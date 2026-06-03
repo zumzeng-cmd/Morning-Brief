@@ -108,12 +108,39 @@ async function fetchEcon() {
   return stripped.slice(0, 2500);
 }
 
-// ── EARNINGS: Yahoo Finance earnings calendar ────────────────
+// ── EARNINGS: Nasdaq earnings calendar (API) ─────────────────
 async function fetchEarnings() {
   const today = new Date().toISOString().slice(0,10);
-  const url = `https://finance.yahoo.com/calendar/earnings?day=${today}`;
-  const html = await fetchUrl(url);
-  return stripHtml(html).slice(0, 2500);
+  // Nasdaq public API - no auth required
+  const url = `https://api.nasdaq.com/api/calendar/earnings?date=${today}`;
+  return new Promise((resolve, reject) => {
+    const req = require("https").get(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json",
+        "Origin": "https://www.nasdaq.com",
+        "Referer": "https://www.nasdaq.com/"
+      }
+    }, (res) => {
+      let data = "";
+      res.on("data", c => data += c);
+      res.on("end", () => {
+        try {
+          const json = JSON.parse(data);
+          const rows = json?.data?.rows || [];
+          const summary = rows.slice(0, 20).map(r =>
+            `${r.symbol} | EPS Est: ${r.epsForecast} | EPS Act: ${r.eps || "TBD"} | Time: ${r.time}`
+          ).join("
+");
+          resolve(summary || "No earnings data available today");
+        } catch(e) {
+          resolve(data.slice(0, 2000));
+        }
+      });
+    });
+    req.on("error", reject);
+    req.setTimeout(10000, () => { req.destroy(); reject(new Error("Timeout")); });
+  });
 }
 
 // ── PREMARKET: CNBC markets page ─────────────────────────────
