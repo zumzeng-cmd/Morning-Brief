@@ -108,18 +108,12 @@ async function fetchEcon() {
   return stripped.slice(0, 2500);
 }
 
-// ── EARNINGS: EarningsWhispers with stockanalysis fallback ────
+// ── EARNINGS: Yahoo Finance earnings calendar ────────────────
 async function fetchEarnings() {
-  try {
-    const html = await fetchUrl("https://www.earningswhispers.com/calendar");
-    const text = stripHtml(html).slice(0, 2500);
-    if (text.length > 200) return text;
-    throw new Error("Too short");
-  } catch(e) {
-    console.log("Falling back to stockanalysis:", e.message);
-    const html2 = await fetchUrl("https://stockanalysis.com/earnings-calendar/");
-    return stripHtml(html2).slice(0, 2500);
-  }
+  const today = new Date().toISOString().slice(0,10);
+  const url = `https://finance.yahoo.com/calendar/earnings?day=${today}`;
+  const html = await fetchUrl(url);
+  return stripHtml(html).slice(0, 2500);
 }
 
 // ── PREMARKET: CNBC markets page ─────────────────────────────
@@ -151,7 +145,7 @@ app.post("/api/analyze", async (req, res) => {
       prompt = "From this ForexFactory calendar data, identify today's USD economic reports (impact level, name, actual vs forecast if released). Score bull if risk-on surprises or no major events, bear if risk-off surprises.";
     } else if (topic === "earn") {
       rawData = await fetchEarnings();
-      prompt = "From this investing.com earnings data, identify major S&P500/Nasdaq companies reporting today. Any big beats or misses? Score bull if beats with good guidance, bear if misses or bad guidance, neutral if mixed.";
+      prompt = "From this Yahoo Finance earnings calendar data, identify major S&P500/Nasdaq companies reporting today. Any big beats or misses vs EPS estimates? Score bull if beats with good guidance, bear if misses or bad guidance, neutral if mixed or no major reports.";
     } else if (topic === "premarket") {
       rawData = await fetchPremarket();
       prompt = "From this CNBC data, extract Asia and Europe market performance overnight and US futures direction (NQ, ES, DOW). Score bull if majority green, bear if majority red, neutral if mixed.";
