@@ -108,10 +108,18 @@ async function fetchEcon() {
   return stripped.slice(0, 2500);
 }
 
-// ── EARNINGS: Investing.com earnings calendar ─────────────────
+// ── EARNINGS: EarningsWhispers with stockanalysis fallback ────
 async function fetchEarnings() {
-  const html = await fetchUrl("https://www.investing.com/earnings-calendar/");
-  return stripHtml(html).slice(0, 2500);
+  try {
+    const html = await fetchUrl("https://www.earningswhispers.com/calendar");
+    const text = stripHtml(html).slice(0, 2500);
+    if (text.length > 200) return text;
+    throw new Error("Too short");
+  } catch(e) {
+    console.log("Falling back to stockanalysis:", e.message);
+    const html2 = await fetchUrl("https://stockanalysis.com/earnings-calendar/");
+    return stripHtml(html2).slice(0, 2500);
+  }
 }
 
 // ── PREMARKET: CNBC markets page ─────────────────────────────
