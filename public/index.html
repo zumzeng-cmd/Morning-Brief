@@ -253,11 +253,11 @@ function updateBias(){
   document.getElementById('scoreBar').style.background=color;
 }
 
-async function analyze(prompt){
+async function analyze(topic){
   const res=await fetch('/api/analyze',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({prompt})
+    body:JSON.stringify({topic})
   });
   if(!res.ok) throw new Error('Server error '+res.status);
   return res.json();
@@ -268,26 +268,18 @@ async function runAll(){
   running=true;
   const btn=document.getElementById('runBtn');
   btn.disabled=true;btn.textContent='⟳ ANALYZING...';
-  document.getElementById('footerNote').textContent='Fetching live data — takes 20-30 seconds...';
-  const today=new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
-  const prompts={
-    econ:`Search: US economic reports today ${today}. Any high-impact data (CPI/NFP/FOMC/GDP/PMI)? Beat or miss? Return JSON: {"signal":"bull|bear|neutral","summary":"2 sentences","score":1|-1|0}`,
-    earn:`Search: major S&P500 earnings today or yesterday ${today}. Beat/miss? Guidance? Return JSON: {"signal":"bull|bear|neutral","summary":"2 sentences","score":1|-1|0}`,
-    premarket:`Search: Asian and European markets overnight ${today}. Nikkei, DAX, FTSE, NQ futures direction. Return JSON: {"signal":"bull|bear|neutral","summary":"2 sentences","score":1|-1|0}`,
-    news:`Search: key market news ${today} for NQ/ES futures. Fed, macro, geopolitical. Return JSON: {"signal":"bull|bear|neutral","summary":"2 sentences","score":1|-1|0}`
-  };
+  document.getElementById('footerNote').textContent='Fetching live data from ForexFactory, Investing.com & CNBC...';
   const keys=['econ','earn','premarket','news'];
   keys.forEach(k=>setCardLoading(k));
   for(const key of keys){
     try{
-      const result=await analyze(prompts[key]);
+      const result=await analyze(key);
       setCardResult(key,result);
     }catch(e){
       console.error(key,e);
       setCardError(key);
     }
-    // small delay between calls to avoid rate limits
-    await new Promise(r=>setTimeout(r,2000));
+    await new Promise(r=>setTimeout(r,1500));
   }
   running=false;
   btn.disabled=false;btn.textContent='↺ REFRESH ANALYSIS';
