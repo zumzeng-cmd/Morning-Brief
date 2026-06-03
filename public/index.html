@@ -271,10 +271,10 @@ async function runAll(){
   document.getElementById('footerNote').textContent='Fetching live data — takes 20-30 seconds...';
   const today=new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
   const prompts={
-    econ:`Search for today's (${today}) US economic calendar. Look for high-impact reports: CPI, PPI, NFP, FOMC, GDP, PMI, jobless claims, retail sales, ISM. What's scheduled or already released? Any beats or misses vs expectations? Score bull if risk-on surprise or no major risk-off news, bear if risk-off surprise, neutral if nothing major.`,
-    earn:`Search for major earnings released today or after close yesterday (${today}). Focus on S&P500/Nasdaq large caps that move index futures. Beat or miss? Guidance raised or lowered? Market reaction? Score bull if beats with positive guidance, bear if misses or weak guidance, neutral if mixed or no major reports.`,
-    premarket:`Search for overnight and pre-market performance on ${today}. Check: Nikkei, Shanghai Composite, Hang Seng, DAX, FTSE 100. Also US futures: NQ (Nasdaq), ES (S&P). Up or down and by how much? Score bull if majority green, bear if majority red, neutral if mixed.`,
-    news:`Search for major market-moving news on ${today} affecting US index futures. Fed comments, geopolitical developments, trade policy, macro surprises, sector catalysts. What's the dominant risk tone? Score bull if risk-on, bear if risk-off, neutral if quiet or mixed.`
+    econ:`Search: US economic reports today ${today}. Any high-impact data (CPI/NFP/FOMC/GDP/PMI)? Beat or miss? Return JSON: {"signal":"bull|bear|neutral","summary":"2 sentences","score":1|-1|0}`,
+    earn:`Search: major S&P500 earnings today or yesterday ${today}. Beat/miss? Guidance? Return JSON: {"signal":"bull|bear|neutral","summary":"2 sentences","score":1|-1|0}`,
+    premarket:`Search: Asian and European markets overnight ${today}. Nikkei, DAX, FTSE, NQ futures direction. Return JSON: {"signal":"bull|bear|neutral","summary":"2 sentences","score":1|-1|0}`,
+    news:`Search: key market news ${today} for NQ/ES futures. Fed, macro, geopolitical. Return JSON: {"signal":"bull|bear|neutral","summary":"2 sentences","score":1|-1|0}`
   };
   const keys=['econ','earn','premarket','news'];
   keys.forEach(k=>setCardLoading(k));
