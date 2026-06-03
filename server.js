@@ -33,7 +33,7 @@ app.post("/api/analyze", async (req, res) => {
         "anthropic-beta": "web-search-2025-03-05"
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-6",
         max_tokens: 1000,
         tools: [{ type: "web_search_20250305", name: "web_search" }],
         system: `You are a futures trader's morning briefing assistant. Analyze the given topic and return ONLY a valid JSON object with NO markdown, NO backticks, NO extra text.
