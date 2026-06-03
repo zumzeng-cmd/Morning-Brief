@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Morning Brief — Futures Bias Engine</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Bebas+Neue&display=swap');
+*{box-sizing:border-box;margin:0;padding:0;}
+:root{
+  --bg:#080C0F;--surface:#0E1318;--surface2:#141B22;--border:#1E2830;
+  --accent:#00FF94;--accent2:#FFB800;--bear:#FF4444;--bull:#00FF94;
+  --neutral:#4A5568;--text:#E2E8F0;--muted:#4A6070;
+  --font-display:'Bebas Neue',sans-serif;--font-mono:'DM Mono',monospace;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font-mono);min-height:100vh;overflow-x:hidden;}
+body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);background-size:40px 40px;opacity:0.3;pointer-events:none;z-index:0;}
+.wrap{position:relative;z-index:1;padding:1.5rem;max-width:1100px;margin:0 auto;}
+.hdr{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:1.5rem;border-bottom:1px solid var(--border);padding-bottom:1rem;}
+.hdr-title{font-family:var(--font-display);font-size:42px;letter-spacing:2px;color:var(--accent);line-height:1;}
+.hdr-sub{font-size:11px;color:var(--muted);margin-top:4px;letter-spacing:0.1em;}
+.clock{font-family:var(--font-display);font-size:32px;color:var(--text);letter-spacing:2px;}
+.date-txt{font-size:11px;color:var(--muted);letter-spacing:0.08em;text-align:right;}
+.bias-banner{border:1px solid var(--border);border-radius:4px;padding:1rem 1.5rem;margin-bottom:1.5rem;display:flex;align-items:center;justify-content:space-between;gap:1rem;}
+.bias-label{font-size:11px;color:var(--muted);letter-spacing:0.12em;text-transform:uppercase;}
+.bias-value{font-family:var(--font-display);font-size:36px;letter-spacing:3px;transition:color 0.5s;}
+.score-bar-wrap{flex:1;height:6px;background:var(--surface2);border-radius:3px;overflow:hidden;}
+.score-bar{height:6px;border-radius:3px;transition:width 0.6s,background 0.6s;width:50%;background:var(--border);}
+.bias-score{text-align:right;}
+.agg-num{font-family:var(--font-display);font-size:28px;}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem;}
+@media(max-width:640px){.grid{grid-template-columns:1fr;}}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:4px;overflow:hidden;transition:border-color 0.3s;}
+.card.bull{border-color:rgba(0,255,148,0.3);}
+.card.bear{border-color:rgba(255,68,68,0.3);}
+.card-hdr{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--surface2);}
+.card-title{font-size:11px;letter-spacing:0.1em;color:var(--muted);text-transform:uppercase;}
+.card-sig{font-size:11px;font-weight:500;padding:2px 10px;border-radius:2px;letter-spacing:0.08em;}
+.sig-bull{background:rgba(0,255,148,0.12);color:var(--bull);}
+.sig-bear{background:rgba(255,68,68,0.12);color:var(--bear);}
+.sig-neu{background:rgba(74,86,104,0.2);color:var(--muted);}
+.card-body{padding:12px 14px;min-height:80px;font-size:12px;line-height:1.7;color:#8FA8B8;}
+.card-body.idle{color:var(--muted);font-style:italic;}
+.card-body.loading{display:flex;align-items:center;gap:8px;color:var(--muted);}
+.spinner{width:12px;height:12px;border:1.5px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.card-footer{padding:6px 14px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
+.card-pts{font-family:var(--font-display);font-size:20px;}
+.pts-bull{color:var(--bull);}.pts-bear{color:var(--bear);}.pts-neu{color:var(--muted);}
+.card-weight{font-size:10px;color:var(--muted);}
+.override-row{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:1rem;}
+@media(max-width:640px){.override-row{grid-template-columns:1fr 1fr;}}
+.override-card{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:10px 12px;}
+.override-label{font-size:10px;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:6px;}
+.override-btns{display:flex;gap:4px;}
+.obtn{flex:1;padding:4px 0;border:1px solid var(--border);background:transparent;color:var(--muted);font-family:var(--font-mono);font-size:10px;border-radius:2px;cursor:pointer;transition:all 0.2s;}
+.obtn:hover{border-color:var(--accent);color:var(--accent);}
+.obtn.active-bull{background:rgba(0,255,148,0.1);border-color:var(--bull);color:var(--bull);}
+.obtn.active-bear{background:rgba(255,68,68,0.1);border-color:var(--bear);color:var(--bear);}
+.obtn.active-neu{background:rgba(74,86,104,0.15);border-color:var(--neutral);color:var(--text);}
+.run-btn{width:100%;padding:14px;background:transparent;border:1px solid var(--accent);color:var(--accent);font-family:var(--font-display);font-size:22px;letter-spacing:3px;border-radius:4px;cursor:pointer;transition:all 0.2s;margin-bottom:0.75rem;}
+.run-btn:hover:not(:disabled){background:rgba(0,255,148,0.08);}
+.run-btn:disabled{border-color:var(--border);color:var(--muted);cursor:not-allowed;}
+.footer-note{font-size:10px;color:var(--muted);text-align:center;letter-spacing:0.06em;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hdr">
+    <div>
+      <div class="hdr-title">MORNING BRIEF</div>
+      <div class="hdr-sub">FUTURES TRADER · DAILY BIAS ENGINE</div>
+    </div>
+    <div>
+      <div class="clock" id="clock">--:--</div>
+      <div class="date-txt" id="dateTxt">-- --- ----</div>
+    </div>
+  </div>
+
+  <div class="bias-banner">
+    <div>
+      <div class="bias-label">Today's bias</div>
+      <div class="bias-value" id="biasValue" style="color:var(--muted);">AWAITING ANALYSIS</div>
+    </div>
+    <div class="score-bar-wrap"><div class="score-bar" id="scoreBar"></div></div>
+    <div class="bias-score">
+      <div class="bias-label">Aggregate</div>
+      <div class="agg-num" id="aggScore" style="color:var(--muted);">—</div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card" id="card-econ">
+      <div class="card-hdr">
+        <span class="card-title">📅 Econ Calendar</span>
+        <span class="card-sig sig-neu" id="sig-econ">NEUTRAL</span>
+      </div>
+      <div class="card-body idle" id="body-econ">Run analysis to fetch today's reports...</div>
+      <div class="card-footer">
+        <span class="card-pts pts-neu" id="pts-econ">0.0</span>
+        <span class="card-weight">Weight: 3×</span>
+      </div>
+    </div>
+    <div class="card" id="card-earn">
+      <div class="card-hdr">
+        <span class="card-title">📊 Earnings</span>
+        <span class="card-sig sig-neu" id="sig-earn">NEUTRAL</span>
+      </div>
+      <div class="card-body idle" id="body-earn">Run analysis to check earnings...</div>
+      <div class="card-footer">
+        <span class="card-pts pts-neu" id="pts-earn">0.0</span>
+        <span class="card-weight">Weight: 2×</span>
+      </div>
+    </div>
+    <div class="card" id="card-premarket">
+      <div class="card-hdr">
+        <span class="card-title">🌏 Pre-Market</span>
+        <span class="card-sig sig-neu" id="sig-premarket">NEUTRAL</span>
+      </div>
+      <div class="card-body idle" id="body-premarket">Run analysis to check overnight markets...</div>
+      <div class="card-footer">
+        <span class="card-pts pts-neu" id="pts-premarket">0.0</span>
+        <span class="card-weight">Weight: 2×</span>
+      </div>
+    </div>
+    <div class="card" id="card-news">
+      <div class="card-hdr">
+        <span class="card-title">📰 Market News</span>
+        <span class="card-sig sig-neu" id="sig-news">NEUTRAL</span>
+      </div>
+      <div class="card-body idle" id="body-news">Run analysis to scan headlines...</div>
+      <div class="card-footer">
+        <span class="card-pts pts-neu" id="pts-news">0.0</span>
+        <span class="card-weight">Weight: 2×</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="override-row">
+    <div class="override-card">
+      <div class="override-label">Override: Econ</div>
+      <div class="override-btns">
+        <button class="obtn" onclick="setOverride('econ','bull',this)">BULL</button>
+        <button class="obtn" onclick="setOverride('econ','neu',this)">NEU</button>
+        <button class="obtn" onclick="setOverride('econ','bear',this)">BEAR</button>
+        <button class="obtn" onclick="clearOverride('econ',this)">AI</button>
+      </div>
+    </div>
+    <div class="override-card">
+      <div class="override-label">Override: Earnings</div>
+      <div class="override-btns">
+        <button class="obtn" onclick="setOverride('earn','bull',this)">BULL</button>
+        <button class="obtn" onclick="setOverride('earn','neu',this)">NEU</button>
+        <button class="obtn" onclick="setOverride('earn','bear',this)">BEAR</button>
+        <button class="obtn" onclick="clearOverride('earn',this)">AI</button>
+      </div>
+    </div>
+    <div class="override-card">
+      <div class="override-label">Override: Pre-Market</div>
+      <div class="override-btns">
+        <button class="obtn" onclick="setOverride('premarket','bull',this)">BULL</button>
+        <button class="obtn" onclick="setOverride('premarket','neu',this)">NEU</button>
+        <button class="obtn" onclick="setOverride('premarket','bear',this)">BEAR</button>
+        <button class="obtn" onclick="clearOverride('premarket',this)">AI</button>
+      </div>
+    </div>
+    <div class="override-card">
+      <div class="override-label">Override: News</div>
+      <div class="override-btns">
+        <button class="obtn" onclick="setOverride('news','bull',this)">BULL</button>
+        <button class="obtn" onclick="setOverride('news','neu',this)">NEU</button>
+        <button class="obtn" onclick="setOverride('news','bear',this)">BEAR</button>
+        <button class="obtn" onclick="clearOverride('news',this)">AI</button>
+      </div>
+    </div>
+  </div>
+
+  <button class="run-btn" id="runBtn" onclick="runAll()">▶ RUN MORNING ANALYSIS</button>
+  <div class="footer-note" id="footerNote">Powered by Claude AI · Live web search · Data fetched fresh each session</div>
+</div>
+
+<script>
+const WEIGHTS={econ:3,earn:2,premarket:2,news:2};
+const MAX=Object.values(WEIGHTS).reduce((a,b)=>a+b,0);
+let scores={econ:0,earn:0,premarket:0,news:0};
+let overrides={econ:null,earn:null,premarket:null,news:null};
+let running=false;
+
+function updateClock(){
+  const now=new Date();
+  document.getElementById('clock').textContent=now.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
+  document.getElementById('dateTxt').textContent=now.toLocaleDateString('en-US',{weekday:'short',day:'2-digit',month:'short',year:'numeric'}).toUpperCase();
+}
+updateClock();setInterval(updateClock,1000);
+
+function setOverride(key,val,btn){
+  overrides[key]=val;
+  btn.parentElement.querySelectorAll('.obtn').forEach(b=>b.className='obtn');
+  btn.className='obtn active-'+(val==='bull'?'bull':val==='bear'?'bear':'neu');
+  scores[key]=val==='bull'?1:val==='bear'?-1:0;
+  updateBias();
+}
+function clearOverride(key,btn){
+  overrides[key]=null;
+  btn.parentElement.querySelectorAll('.obtn').forEach(b=>b.className='obtn');
+  updateBias();
+}
+
+function setCardLoading(key){
+  document.getElementById('body-'+key).innerHTML='<div class="spinner"></div> Fetching live data...';
+  document.getElementById('body-'+key).className='card-body loading';
+}
+
+function setCardResult(key,result){
+  const sig=result.signal==='bull'?'BULLISH':result.signal==='bear'?'BEARISH':'NEUTRAL';
+  const sigClass=result.signal==='bull'?'sig-bull':result.signal==='bear'?'sig-bear':'sig-neu';
+  const pts=result.score*WEIGHTS[key];
+  const ptsClass=pts>0?'pts-bull':pts<0?'pts-bear':'pts-neu';
+  document.getElementById('sig-'+key).textContent=sig;
+  document.getElementById('sig-'+key).className='card-sig '+sigClass;
+  document.getElementById('body-'+key).textContent=result.summary;
+  document.getElementById('body-'+key).className='card-body';
+  document.getElementById('pts-'+key).textContent=(pts>=0?'+':'')+pts.toFixed(1);
+  document.getElementById('pts-'+key).className='card-pts '+ptsClass;
+  document.getElementById('card-'+key).className='card '+(result.signal==='bull'?'bull':result.signal==='bear'?'bear':'');
+  if(!overrides[key]) scores[key]=result.score;
+  updateBias();
+}
+
+function setCardError(key){
+  document.getElementById('body-'+key).textContent='Could not fetch data. Use override buttons to set manually.';
+  document.getElementById('body-'+key).className='card-body idle';
+}
+
+function updateBias(){
+  const raw=Object.keys(scores).reduce((sum,k)=>{
+    const s=overrides[k]!=null?(overrides[k]==='bull'?1:overrides[k]==='bear'?-1:0):scores[k];
+    return sum+s*WEIGHTS[k];
+  },0);
+  const norm=Math.max(-10,Math.min(10,(raw/MAX)*10));
+  const pct=((norm+10)/20*100).toFixed(1);
+  let label,color;
+  if(norm>=6){label='STRONGLY BULLISH';color='var(--bull)';}
+  else if(norm>=2){label='MILDLY BULLISH';color='#7AE89A';}
+  else if(norm<=-6){label='STRONGLY BEARISH';color='var(--bear)';}
+  else if(norm<=-2){label='MILDLY BEARISH';color='#E87A7A';}
+  else{label='MIXED / NEUTRAL';color='var(--accent2)';}
+  document.getElementById('biasValue').textContent=label;
+  document.getElementById('biasValue').style.color=color;
+  document.getElementById('aggScore').textContent=(norm>=0?'+':'')+norm.toFixed(1);
+  document.getElementById('aggScore').style.color=color;
+  document.getElementById('scoreBar').style.width=pct+'%';
+  document.getElementById('scoreBar').style.background=color;
+}
+
+async function analyze(prompt){
+  const res=await fetch('/api/analyze',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({prompt})
+  });
+  if(!res.ok) throw new Error('Server error '+res.status);
+  return res.json();
+}
+
+async function runAll(){
+  if(running)return;
+  running=true;
+  const btn=document.getElementById('runBtn');
+  btn.disabled=true;btn.textContent='⟳ ANALYZING...';
+  document.getElementById('footerNote').textContent='Fetching live data — takes 20-30 seconds...';
+  const today=new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+  const prompts={
+    econ:`Search for today's (${today}) US economic calendar. Look for high-impact reports: CPI, PPI, NFP, FOMC, GDP, PMI, jobless claims, retail sales, ISM. What's scheduled or already released? Any beats or misses vs expectations? Score bull if risk-on surprise or no major risk-off news, bear if risk-off surprise, neutral if nothing major.`,
+    earn:`Search for major earnings released today or after close yesterday (${today}). Focus on S&P500/Nasdaq large caps that move index futures. Beat or miss? Guidance raised or lowered? Market reaction? Score bull if beats with positive guidance, bear if misses or weak guidance, neutral if mixed or no major reports.`,
+    premarket:`Search for overnight and pre-market performance on ${today}. Check: Nikkei, Shanghai Composite, Hang Seng, DAX, FTSE 100. Also US futures: NQ (Nasdaq), ES (S&P). Up or down and by how much? Score bull if majority green, bear if majority red, neutral if mixed.`,
+    news:`Search for major market-moving news on ${today} affecting US index futures. Fed comments, geopolitical developments, trade policy, macro surprises, sector catalysts. What's the dominant risk tone? Score bull if risk-on, bear if risk-off, neutral if quiet or mixed.`
+  };
+  const keys=['econ','earn','premarket','news'];
+  keys.forEach(k=>setCardLoading(k));
+  await Promise.all(keys.map(async key=>{
+    try{
+      const result=await analyze(prompts[key]);
+      setCardResult(key,result);
+    }catch(e){
+      console.error(key,e);
+      setCardError(key);
+    }
+  }));
+  running=false;
+  btn.disabled=false;btn.textContent='↺ REFRESH ANALYSIS';
+  document.getElementById('footerNote').textContent='Last run: '+new Date().toLocaleTimeString()+' · Powered by Claude AI';
+}
+</script>
+</body>
+</html>
