@@ -179,10 +179,14 @@ const ECON_PROMPT = [
   "For each included report list: name, actual vs forecast, beat or miss.",
   "INTELLIGENT SCORING RULES - use context to determine score, do not treat all reports equally:",
   "TIER 1 (highest weight - market-moving): Fed rate decision, FOMC statement, NFP, CPI, Core CPI, PCE, Core PCE. These can single-handedly move NQ 1-2%. If any Tier 1 report released today, it dominates the score.",
-  "TIER 2 (high weight - currently Fed-focused): JOLTS, Jobless Claims, ADP, Unemployment Rate, PPI. The Fed is using labor market data to guide rate decisions so JOLTS and claims carry more weight than GDP right now.",
+  "TIER 2 (high weight - currently Fed-focused): JOLTS, Jobless Claims, ADP, Unemployment Rate, PPI. IMPORTANT NUANCE FOR JOLTS AND LABOR DATA: A JOLTS beat (more openings) signals strong economy which is BULLISH for earnings and risk assets UNLESS the market is specifically worried about Fed overtightening. In the current environment where market has largely priced in higher-for-longer, a strong labor market = strong economy = bullish for equities. Only score labor beats as bearish if there is an active Fed meeting imminent or CPI is running hot simultaneously. Jobless Claims rising = bearish (layoffs), Jobless Claims falling = bullish (employment strong).",
   "TIER 3 (medium weight): GDP, ISM, PMI, Consumer Confidence, UoM Sentiment, Average Hourly Earnings.",
   "TIER 4 (lower weight): Oil inventories, Natural Gas, London metals fixes.",
-  "SCORING LOGIC: Score based on the highest-tier reports released. A Tier 1 beat overrides mixed Tier 3 data. Mixed Tier 1 = neutral. Multiple Tier 2 beats with Tier 3 miss = lean bull. Use score: 1 (bull), -1 (bear), 0 (neutral). In your summary explain WHICH reports drove the score and WHY they matter more than others."
+  "MARKET REGIME AWARENESS - critical for correct scoring:",
+  "GOOD NEWS IS GOOD NEWS regime (current default): Strong economic data = bullish for equities. Use this when: inflation is trending down, Fed is on hold or cutting, no imminent rate hike fears.",
+  "BAD NEWS IS GOOD NEWS regime: Weak data = bullish because it forces Fed to cut. Use this when: inflation is running very hot AND Fed is actively hiking.",
+  "CURRENT REGIME (2025-2026): Inflation has cooled significantly from 2022 peaks. Fed has been cutting. Market is in GOOD NEWS IS GOOD NEWS mode. Therefore: strong labor data = bullish, strong GDP = bullish, strong ISM = bullish. Only flip to bearish if inflation re-accelerates sharply (CPI/PCE well above forecast).",
+  "SCORING LOGIC: Score based on the highest-tier reports released. A Tier 1 beat overrides mixed Tier 3 data. Mixed Tier 1 = neutral. Multiple Tier 2 beats with Tier 3 miss = lean bull. Use score: 1 (bull), -1 (bear), 0 (neutral). In your summary explain WHICH reports drove the score, WHY they matter more than others, and which market regime you are applying."
 ].join(" ");
 
 const EARN_PROMPT = [
