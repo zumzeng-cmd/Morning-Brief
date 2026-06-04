@@ -267,13 +267,28 @@ const EARN_PROMPT = [
 const PREMARKET_PROMPT = "From this CNBC data extract Asia and Europe overnight market performance and US futures direction (NQ, ES, DOW, YM). Name specific index levels or % changes if visible. Score bull if majority green, bear if majority red, neutral if mixed.";
 const NEWS_PROMPT = [
   "From this CNBC markets page identify the most impactful stories for US index futures (NQ/ES) today.",
-  "INTELLIGENT WEIGHTING - not all news is equal:",
-  "HIGHEST IMPACT (can move NQ 1%+): Fed surprise announcements, emergency rate decisions, major geopolitical escalation (war, oil embargo), financial system stress (bank failures, credit events), unexpected major macro data.",
-  "HIGH IMPACT: Fed speaker hawkish/dovish shift, Middle East/oil supply disruption, China-US trade escalation, major tech regulatory action, broad market selloff/rally drivers.",
-  "MEDIUM IMPACT: Sector-specific news, individual company news (unless mega-cap), routine geopolitical updates.",
-  "LOW IMPACT (do not let this drive the score): Social media trends, minor company news, routine analyst upgrades/downgrades.",
-  "SCORING LOGIC: Score based on the highest-impact story present. One major geopolitical shock = bear even if other news is positive. Fed dovish surprise = bull even with negative earnings news. Mixed high-impact stories = neutral.",
-  "In summary, state the top story, why it matters for NQ/ES specifically, and what the likely market reaction is.",
+  "INTELLIGENT WEIGHTING - use these severity levels:",
+
+  "LEVEL 5 - MARKET SHOCK OVERRIDE (these completely dominate all other signals including econ data):",
+  "- GEOPOLITICAL: Active military conflict outbreak or major escalation (US-Iran strike, Russia-NATO confrontation, China-Taiwan military action), terrorist attack on major financial center, oil embargo, Strait of Hormuz closure, nuclear/biological threat",
+  "- SYSTEMIC FINANCIAL: Unexpected major bank failure (SVB-scale or larger), sovereign debt crisis/default of major economy, sudden liquidity freeze, emergency central bank intervention outside scheduled meetings, flash crash",
+  "- NATURAL DISASTER/PANDEMIC: Major earthquake hitting financial hub, hurricane/flood shutting down key infrastructure, new pandemic declaration by WHO, supply chain catastrophe",
+  "- POLICY/REGULATORY SHOCK: Emergency presidential executive order affecting markets, surprise nationalization of major industry, sweeping antitrust breakup ruling on mega-cap (AAPL, GOOGL, META), extreme overnight tariff announcement (50%+ on major trade partner), crypto ban or asset freeze",
+  "- ELECTIONS & POLITICAL: Surprise election outcome reversing expected policy (unexpected party win, contested election results causing constitutional crisis), presidential impeachment or removal, major cabinet resignation during crisis",
+  "- CORPORATE MEGA-SHOCK: Sudden CEO removal of Magnificent 7 company, accounting fraud discovery at systemically important firm, unexpected merger of two index heavyweights",
+  "If ANY Level 5 event detected: score -1 AND include MARKET_SHOCK_OVERRIDE in summary. This tells the dashboard to discount all other signals.",
+
+  "LEVEL 4 - HIGHEST IMPACT (moves NQ 1%+ intraday, does not override but heavily weights score):",
+  "- Fed surprise rate move or emergency statement, major geopolitical tension spike, oil supply shock >5%, large tariff announcement on key sector, major country sanctions, significant election result (not crisis level), large-scale cyber attack on critical infrastructure",
+
+  "LEVEL 3 - HIGH IMPACT (significant move, normal scoring):",
+  "- Fed speaker hawkish/dovish pivot, Middle East escalation, China-US trade action, major tech regulatory action, broad risk-off catalyst, significant natural disaster affecting supply chains, election polls showing major shift",
+
+  "LEVEL 2 - MEDIUM IMPACT: Sector news, individual large-cap catalyst, routine policy update, moderate geopolitical tension",
+
+  "LEVEL 1 - LOW IMPACT (do not score): Routine analyst calls, minor company news, social media trends",
+
+  "SCORING LOGIC: Score based on highest severity level present. Level 5 = MARKET_SHOCK_OVERRIDE + score -1. Level 4 = strong -1. Level 3 = -1 or +1 depending on direction. In summary state: event name, severity level, and specifically why it moves NQ/ES.",
   "Score: 1 (bull), -1 (bear), 0 (neutral)."
 ].join(" ");
 
