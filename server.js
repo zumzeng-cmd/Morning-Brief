@@ -112,7 +112,7 @@ function callClaude(prompt, data) {
     const today = new Date().toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
     const payload = JSON.stringify({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 250,
+      max_tokens: 400,
       system: "You are a futures trader morning briefing assistant. Today is " + today + ". CRITICAL: Reply ONLY with raw JSON, no markdown, no backticks, no explanation. Format: {\"signal\":\"bull\",\"summary\":\"2 sentence summary\",\"score\":1} where signal is bull/bear/neutral and score is 1/-1/0.",
       messages: [{ role: "user", content: prompt + "\n\nDATA:\n" + data }]
     });
@@ -155,12 +155,36 @@ const ECON_PROMPT = [
   "- Any other HIGH or MEDIUM impact USD event",
   "EXCLUDE: Low impact events, non-USD currency data (except London metals), routine housing data.",
   "For each included report list: name, actual vs forecast, beat or miss.",
-  "Score: bull if majority beat expectations (risk-on), bear if majority miss (risk-off), neutral if mixed or nothing released yet."
+  "INTELLIGENT SCORING RULES - use context to determine score, do not treat all reports equally:",
+  "TIER 1 (highest weight - market-moving): Fed rate decision, FOMC statement, NFP, CPI, Core CPI, PCE, Core PCE. These can single-handedly move NQ 1-2%. If any Tier 1 report released today, it dominates the score.",
+  "TIER 2 (high weight - currently Fed-focused): JOLTS, Jobless Claims, ADP, Unemployment Rate, PPI. The Fed is using labor market data to guide rate decisions so JOLTS and claims carry more weight than GDP right now.",
+  "TIER 3 (medium weight): GDP, ISM, PMI, Consumer Confidence, UoM Sentiment, Average Hourly Earnings.",
+  "TIER 4 (lower weight): Oil inventories, Natural Gas, London metals fixes.",
+  "SCORING LOGIC: Score based on the highest-tier reports released. A Tier 1 beat overrides mixed Tier 3 data. Mixed Tier 1 = neutral. Multiple Tier 2 beats with Tier 3 miss = lean bull. Use score: 1 (bull), -1 (bear), 0 (neutral). In your summary explain WHICH reports drove the score and WHY they matter more than others."
 ].join(" ");
 
-const EARN_PROMPT = "From this Nasdaq earnings data (symbol | EPS estimate | EPS actual | time), identify major S&P500/Nasdaq companies reporting today. Any beats or misses? Score bull if beats dominate, bear if misses dominate, neutral if mixed or TBD.";
+const EARN_PROMPT = [
+  "From this earnings data, score based on INDEX IMPACT not equal weighting of all companies.",
+  "MEGA-CAP INDEX HEAVYWEIGHTS (highest weight - these move NQ/ES by themselves): NVDA, AAPL, MSFT, META, GOOGL, GOOG, AMZN, TSLA, AVGO, NFLX, AMD.",
+  "LARGE-CAP HIGH IMPACT (significant weight): JPM, GS, BAC, MS, V, MA, UNH, LLY, JNJ, XOM, CVX, CRM, ORCL, ADBE, QCOM, MU, INTC, NOW.",
+  "SECTOR BELLWETHERS (medium weight - moves sector not full index): Any company that is the largest in its sector.",
+  "SMALL/MID CAP (low weight - ignore unless massive beat/miss): Everything else.",
+  "SCORING LOGIC: If a mega-cap beats big = strong bull. If a mega-cap misses = strong bear. Multiple large-caps beating with no mega-cap = mild bull. All TBD = neutral. Mixed mega-caps = neutral.",
+  "In your summary, lead with the mega-cap and large-cap results first. Mention the company name and whether it beat or missed. Ignore or briefly mention small caps.",
+  "Score: 1 (bull), -1 (bear), 0 (neutral)."
+].join(" ");
 const PREMARKET_PROMPT = "From this CNBC data extract Asia and Europe overnight market performance and US futures direction (NQ, ES, DOW, YM). Name specific index levels or % changes if visible. Score bull if majority green, bear if majority red, neutral if mixed.";
-const NEWS_PROMPT = "From this CNBC markets page identify the 2-3 most impactful stories for US index futures (NQ/ES) today. Focus on Fed news, macro data, geopolitical events, major sector moves. Score bull if risk-on tone, bear if risk-off, neutral if mixed.";
+const NEWS_PROMPT = [
+  "From this CNBC markets page identify the most impactful stories for US index futures (NQ/ES) today.",
+  "INTELLIGENT WEIGHTING - not all news is equal:",
+  "HIGHEST IMPACT (can move NQ 1%+): Fed surprise announcements, emergency rate decisions, major geopolitical escalation (war, oil embargo), financial system stress (bank failures, credit events), unexpected major macro data.",
+  "HIGH IMPACT: Fed speaker hawkish/dovish shift, Middle East/oil supply disruption, China-US trade escalation, major tech regulatory action, broad market selloff/rally drivers.",
+  "MEDIUM IMPACT: Sector-specific news, individual company news (unless mega-cap), routine geopolitical updates.",
+  "LOW IMPACT (do not let this drive the score): Social media trends, minor company news, routine analyst upgrades/downgrades.",
+  "SCORING LOGIC: Score based on the highest-impact story present. One major geopolitical shock = bear even if other news is positive. Fed dovish surprise = bull even with negative earnings news. Mixed high-impact stories = neutral.",
+  "In summary, state the top story, why it matters for NQ/ES specifically, and what the likely market reaction is.",
+  "Score: 1 (bull), -1 (bear), 0 (neutral)."
+].join(" ");
 
 // ── Main analyze endpoint ─────────────────────────────────────
 app.post("/api/analyze", async function(req, res) {
