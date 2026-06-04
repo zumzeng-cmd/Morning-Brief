@@ -143,10 +143,17 @@ async function fetchEarnings() {
     if (epsAct !== "TBD" && epsEst !== "N/A") {
       const diff = parseFloat(epsAct) - parseFloat(epsEst);
       const pct = Math.abs(diff) / Math.abs(parseFloat(epsEst));
-      // Only call BEAT/MISS if difference is more than 1% — anything within 1% is IN-LINE
-      // This avoids false misses from consensus differences between data providers
-      if (pct < 0.01) beat = "IN-LINE";
-      else beat = diff > 0 ? "BEAT" : "MISS";
+      if (isMega) {
+        // Mega-caps: any miss is a miss, any beat is a beat — no tolerance
+        // $2T+ companies are priced for perfection, even $0.01 matters
+        if (diff > 0) beat = "BEAT";
+        else if (diff < 0) beat = "MISS";
+        else beat = "IN-LINE";
+      } else {
+        // Large/mid caps: 1% tolerance to filter out consensus noise
+        if (pct < 0.01) beat = "IN-LINE";
+        else beat = diff > 0 ? "BEAT" : "MISS";
+      }
     }
     const rev = r.revenueActual ? " | Rev: $" + (r.revenueActual/1e9).toFixed(2) + "B" : "";
     const revEst = r.revenueEstimate ? " vs Est: $" + (r.revenueEstimate/1e9).toFixed(2) + "B" : "";
@@ -260,7 +267,7 @@ const EARN_PROMPT = [
   "LARGE-CAP HIGH IMPACT (significant weight): JPM, GS, BAC, MS, V, MA, UNH, LLY, JNJ, XOM, CVX, CRM, ORCL, ADBE, QCOM, MU, INTC, NOW.",
   "SECTOR BELLWETHERS (medium weight - moves sector not full index): Any company that is the largest in its sector.",
   "SMALL/MID CAP (low weight - ignore unless massive beat/miss): Everything else.",
-  "SCORING LOGIC: If a mega-cap beats big = strong bull. If a mega-cap misses = strong bear. Multiple large-caps beating with no mega-cap = mild bull. All TBD = neutral. Mixed mega-caps = neutral.","CRITICAL RULE: Only score based on CONFIRMED actual EPS figures in the data provided. If epsActual shows TBD for all companies, score 0 neutral - do NOT use your own knowledge to guess results. Do not infer or assume any company beat or missed unless the actual number is explicitly in the data. If data shows all TBD, say so and score neutral.","IN-LINE RULE: A result marked IN-LINE (within 1% of estimate) for a mega-cap should score neutral not bearish. Consensus estimates differ between data providers by small amounts. Only a clear BEAT or MISS of more than 1% should move the score. Revenue beats/misses can also factor in but should not override EPS direction.","DATA SOURCE: StockAnalysis.com which reports non-GAAP adjusted EPS — the same basis analysts use for estimates. This is the correct number to compare against consensus estimates.",
+  "SCORING LOGIC: If a mega-cap beats big = strong bull. If a mega-cap misses = strong bear. Multiple large-caps beating with no mega-cap = mild bull. All TBD = neutral. Mixed mega-caps = neutral.","CRITICAL RULE: Only score based on CONFIRMED actual EPS figures in the data provided. If epsActual shows TBD for all companies, score 0 neutral - do NOT use your own knowledge to guess results. Do not infer or assume any company beat or missed unless the actual number is explicitly in the data. If data shows all TBD, say so and score neutral.","MEGA-CAP PRECISION RULE: For mega-caps (NVDA, AAPL, MSFT, META, GOOGL, AMZN, TSLA, AVGO, NFLX, AMD) ANY miss is bearish regardless of size. These companies trade at premium valuations and the options market prices in perfection — even $0.01 miss can trigger a selloff. A BEAT of any size is bullish. IN-LINE is neutral. For large-caps use judgment — small misses under 1% can be treated as neutral.","DATA SOURCE: StockAnalysis.com which reports non-GAAP adjusted EPS — the same basis analysts use for estimates. This is the correct number to compare against consensus estimates.",
   "In your summary, lead with the mega-cap and large-cap results first. Mention the company name and whether it beat or missed. Ignore or briefly mention small caps.",
   "Score: 1 (bull), -1 (bear), 0 (neutral)."
 ].join(" ");
