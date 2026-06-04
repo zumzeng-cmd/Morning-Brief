@@ -203,20 +203,25 @@ async function fetchNews() {
 }
 
 // ── Claude ────────────────────────────────────────────────────
-function callClaude(prompt, data) {
+function callClaude(prompt, data, useWebSearch) {
   return new Promise((resolve, reject) => {
     const today = new Date().toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
-    const payload = JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 400,
+    const body = {
+      model: "claude-sonnet-4-6",
+      max_tokens: 500,
       system: "You are a futures trader morning briefing assistant. Today is " + today + ". CRITICAL: Reply ONLY with raw JSON, no markdown, no backticks, no explanation. Format: {\"signal\":\"bull\",\"summary\":\"2 sentence summary\",\"score\":1} where signal is bull/bear/neutral and score is 1/-1/0.",
-      messages: [{ role: "user", content: prompt + "\n\nDATA:\n" + data }]
-    });
+      messages: [{ role: "user", content: prompt + (data && data !== "NO EXTERNAL DATA — use your knowledge only." ? "\n\nDATA:\n" + data : "") }]
+    };
+    if (useWebSearch) {
+      body.tools = [{ type: "web_search_20250305", name: "web_search" }];
+    }
+    const payload = JSON.stringify(body);
     const options = {
       hostname: "api.anthropic.com", path: "/v1/messages", method: "POST",
       headers: {
         "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload),
-        "x-api-key": process.env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01"
+        "x-api-key": process.env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01",
+        "anthropic-beta": "web-search-2025-03-05"
       }
     };
     const req = https.request(options, res => {
@@ -313,14 +318,16 @@ app.post("/api/analyze", async function(req, res) {
       const today2 = new Date();
       const todayStr2 = today2.toISOString().slice(0, 10);
       const dayName2 = today2.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
-      rawData = "NO EXTERNAL DATA — use your knowledge only.";
-      prompt = ECON_PROMPT + " TODAY IS " + dayName2 + " (" + todayStr2 + ")." +
-        " Using your knowledge of the US economic release calendar, identify ALL USD economic reports" +
-        " that are scheduled or were released on " + todayStr2 + "." +
-        " Note: holiday-shifted releases are common — do not assume a report fell on its typical day." +
-        " Search broadly across all categories: labor, inflation, growth, Fed, manufacturing, sentiment, energy inventories, London metals." +
-        " For each report state: name, scheduled time (ET), actual value if released, estimate, and beat/miss." +
-        " Mark unreleased reports as UPCOMING. Only include " + todayStr2 + " — exclude all other dates.";
+      rawData = "NO EXTERNAL DATA";
+      prompt = ECON_PROMPT +
+        " TODAY IS " + dayName2 + " (" + todayStr2 + ")." +
+        " Search the web for: USD economic reports released or scheduled for " + todayStr2 + "." +
+        " Search for: site:bls.gov OR site:bea.gov OR site:federalreserve.gov OR site:eia.gov OR forexfactory calendar " + todayStr2 + " OR investing.com economic calendar " + todayStr2 + "." +
+        " Find actual released values for: Initial Jobless Claims, Continuing Claims, Natural Gas Storage, Crude Oil Inventories, and any other USD reports today." +
+        " For each report found state: name, actual value, estimate, beat/miss, release time." +
+        " Only include " + todayStr2 + " data.";
+      const result2 = await callClaude(prompt, rawData, true);
+      return res.json(result2);
     }
     else if (topic === "earn")      { rawData = await fetchEarnings();   prompt = EARN_PROMPT; }
     else if (topic === "premarket") { rawData = await fetchPremarket();  prompt = PREMARKET_PROMPT; }
@@ -328,7 +335,7 @@ app.post("/api/analyze", async function(req, res) {
     else return res.status(400).json({ error: "Unknown topic" });
 
     console.log("Data length:", rawData.length);
-    const result = await callClaude(prompt, rawData);
+    const result = await callClaude(prompt, rawData, false);
     console.log("Result:", JSON.stringify(result));
     res.json(result);
   } catch(e) {
