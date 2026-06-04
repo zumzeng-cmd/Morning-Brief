@@ -233,6 +233,17 @@ app.get("/intake-status", function(req, res) {
   });
 });
 
+// Debug endpoint — shows first 500 chars of each data source
+app.get("/intake-preview", function(req, res) {
+  res.json({
+    econ:      latestMakeData.econ      ? latestMakeData.econ.slice(0, 500)      : null,
+    earnings:  latestMakeData.earnings  ? latestMakeData.earnings.slice(0, 500)  : null,
+    premarket: latestMakeData.premarket ? latestMakeData.premarket.slice(0, 500) : null,
+    news:      latestMakeData.news      ? latestMakeData.news.slice(0, 500)      : null,
+    timestamp: latestMakeData.timestamp
+  });
+});
+
 // ── Main analyze endpoint ─────────────────────────────────────
 app.post("/api/analyze", async function(req, res) {
   const topic = req.body && req.body.topic;
