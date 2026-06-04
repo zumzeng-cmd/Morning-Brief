@@ -56,74 +56,30 @@ function stripHtml(html, maxLen) {
 async function fetchEcon() {
   const today = new Date();
   const todayStr = today.toISOString().slice(0, 10);
-  const FINNHUB_KEY = process.env.FINNHUB_API_KEY || "d8gh1phr01qlgcujfjfgd8gh1phr01qlgcujfjg0";
+  const dayName = today.toLocaleDateString("en-US", { weekday: "long" });
+  const fullDate = today.toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
 
-  // High/medium impact USD events we care about
-  const IMPORTANT = [
-    "nonfarm","non-farm","payroll","jolts","jobless","unemployment","initial claim","continuing claim","adp",
-    "cpi","consumer price","ppi","producer price","pce","personal consumption",
-    "gdp","gross domestic",
-    "fomc","federal reserve","fed rate","interest rate","powell","monetary policy",
-    "ism manufacturing","ism services","ism non","pmi","purchasing manager",
-    "consumer confidence","consumer sentiment","michigan","umich",
-    "crude oil","oil inventori","natural gas","eia",
-    "retail sales","durable goods","industrial production","capacity utilization",
-    "trade balance","current account","housing start","building permit",
-    "gold fix","silver fix","copper","platinum","lme","london metal"
-  ];
+  // Build context about what typically releases on each day
+  const dayContext = {
+    "Monday": "Typically: ISM Manufacturing (1st Mon), Factory Orders, Construction Spending",
+    "Tuesday": "Typically: JOLTS Job Openings, Consumer Confidence, ISM Services (3rd Tue), Trade Balance",
+    "Wednesday": "Typically: ADP Employment, ISM Services, EIA Crude Oil Inventories (10:30 AM ET), FOMC minutes/decisions",
+    "Thursday": "Typically: Initial Jobless Claims (8:30 AM ET), Continuing Claims, EIA Natural Gas Storage (10:30 AM ET), sometimes PPI",
+    "Friday": "Typically: NFP/Unemployment Rate (8:30 AM ET 1st Fri), Consumer Sentiment (UoM), sometimes CPI or PCE"
+  };
 
-  try {
-    const raw = await fetchUrl(
-      "https://finnhub.io/api/v1/calendar/economic?token=" + FINNHUB_KEY
-    );
-    const json = JSON.parse(raw);
-    const events = (json && json.economicCalendar) ? json.economicCalendar : [];
+  const typicalDay = dayContext[dayName] || "Check calendar for scheduled events";
 
-    // Filter to today's events only
-    const todayEvents = events.filter(e => e.time && e.time.startsWith(todayStr));
-
-    // Filter to important USD events
-    const usdEvents = todayEvents.filter(e => {
-      const name = (e.event || "").toLowerCase();
-      const country = (e.country || "").toUpperCase();
-      const impact = (e.impact || "").toLowerCase();
-      // Include USD high/medium impact + London metals
-      const isUSD = country === "US" && (impact === "high" || impact === "medium");
-      const isLondonMetal = IMPORTANT.some(k => name.includes(k)) && (country === "GB" || country === "UK");
-      return isUSD || isLondonMetal;
-    });
-
-    if (usdEvents.length === 0) {
-      // Fall back to all today events if filter too strict
-      const allToday = todayEvents.filter(e => (e.country || "").toUpperCase() === "US");
-      if (allToday.length === 0) {
-        return "No USD economic events found in Finnhub for " + todayStr + ". Use your knowledge to recall any major scheduled reports today.";
-      }
-      return formatEconEvents(allToday, todayStr);
-    }
-
-    return formatEconEvents(usdEvents, todayStr);
-
-  } catch(e) {
-    console.log("Finnhub econ error:", e.message);
-    return "Economic data unavailable. Today is " + todayStr + ". Use your knowledge to recall major USD reports scheduled today (check for: jobless claims, NFP, CPI, JOLTS, ISM, GDP, Fed speeches, PCE, PPI, crude oil/natural gas inventories).";
-  }
-}
-
-function formatEconEvents(events, todayStr) {
-  const lines = events.map(e => {
-    const time = e.time ? e.time.replace(todayStr + " ", "") : "";
-    const actual = (e.actual !== null && e.actual !== undefined) ? String(e.actual) : "TBD";
-    const estimate = (e.estimate !== null && e.estimate !== undefined) ? String(e.estimate) : "N/A";
-    const prev = (e.prev !== null && e.prev !== undefined) ? " | Prev: " + e.prev : "";
-    let beat = "";
-    if (actual !== "TBD" && estimate !== "N/A") {
-      beat = parseFloat(actual) > parseFloat(estimate) ? "BEAT" : parseFloat(actual) < parseFloat(estimate) ? "MISS" : "IN-LINE";
-    }
-    const impact = e.impact ? "[" + e.impact.toUpperCase() + "] " : "";
-    return impact + (e.event || "") + " | " + time + " | Act: " + actual + " vs Est: " + estimate + prev + (beat ? " → " + beat : "");
-  });
-  return "USD ECONOMIC CALENDAR FOR " + todayStr + ":\n" + lines.join("\n");
+  return "TODAY IS " + fullDate + ". " +
+    "Day context: " + typicalDay + ". " +
+    "Using your knowledge, identify ALL USD economic reports that were ACTUALLY RELEASED or are SCHEDULED for TODAY " + todayStr + ". " +
+    "Focus on: Initial Jobless Claims, Continuing Claims, Natural Gas Storage (EIA), Crude Oil Inventories (EIA), " +
+    "NFP, Unemployment Rate, CPI, Core CPI, PPI, PCE, Core PCE, GDP, FOMC decisions, Fed speeches, " +
+    "ISM Manufacturing, ISM Services, PMI, Consumer Confidence, UoM Sentiment, JOLTS, ADP, " +
+    "London metals (Gold/Silver/Copper/Platinum AM/PM fix). " +
+    "For each report you know was released today, state: report name, actual value, forecast/estimate, and beat/miss. " +
+    "If a report is scheduled but not yet released, note it as UPCOMING. " +
+    "Only include reports you are confident were scheduled for " + todayStr + ". Do not include yesterday's data.";
 }
 
 async function fetchEarnings() {
@@ -341,7 +297,7 @@ const NEWS_PROMPT = [
 
   "LEVEL 1 - LOW IMPACT (do not score): Routine analyst calls, minor company news, social media trends",
 
-  "SCORING LOGIC: Score based on highest severity level present. Level 5 = MARKET_SHOCK_OVERRIDE + score -1. Level 4 = strong -1. Level 3 = -1 or +1 depending on direction. In summary state: event name, severity level, and specifically why it moves NQ/ES.",
+  "SCORING LOGIC: Score based on highest severity level present. Level 5 = MARKET_SHOCK_OVERRIDE + score -1. Level 4 = strong -1. Level 3 = -1 or +1 depending on direction. IMPORTANT: Do NOT include level labels like Level 3 or Level 4 in your summary text. The summary should read as natural plain English analysis, not reference the internal severity framework. Just describe what is happening and why it matters for NQ/ES.",
   "Score: 1 (bull), -1 (bear), 0 (neutral)."
 ].join(" ");
 
