@@ -235,7 +235,14 @@ function callClaude(prompt, data, useWebSearch) {
           const parsed = JSON.parse(raw);
           if (parsed.error) return reject(new Error(parsed.error.message));
           const text = (parsed.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
-          resolve(JSON.parse(text.replace(/```json|```/g, "").trim()));
+          const cleaned = text.replace(/```json|```/g, "").trim();
+          const result = JSON.parse(cleaned);
+          // Ensure result has required fields — if Claude returned an error object, normalize it
+          if (!result.signal || !result.hasOwnProperty("score")) {
+            resolve({ signal: "neutral", summary: "Could not fetch data. Use override buttons to set manually.", score: 0 });
+          } else {
+            resolve(result);
+          }
         } catch(e) { reject(new Error("Parse error: " + e.message)); }
       });
     });
@@ -339,21 +346,28 @@ app.post("/api/analyze", async function(req, res) {
       const dayName2 = today2.toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
 
       if (latestMakeData.econ && latestMakeData.econ.length > 100) {
-        // Make.com has good data
         rawData = latestMakeData.econ;
         prompt = ECON_PROMPT;
         useSearch = false;
         console.log("Econ: using Make.com data");
       } else {
-        // Always use web search for econ — most reliable for live data
-        rawData = "NO EXTERNAL DATA";
-        prompt = ECON_PROMPT + " TODAY IS " + dayName2 + " (" + todayStr2 + ")." +
-          " Search the web NOW for: USD economic reports released or scheduled for today " + todayStr2 + "." +
-          " Search specifically for: 'Initial Jobless Claims " + todayStr2 + "' AND 'Natural Gas Storage EIA " + todayStr2 + "' AND 'economic calendar " + todayStr2 + "'." +
-          " Report the actual numbers released today with beat/miss vs forecast." +
-          " Only include reports for " + todayStr2 + ".";
-        useSearch = false;
-        console.log("Econ: using Claude knowledge");
+        // Try FMP first
+        const fmpEconData = await fetchEconFMP();
+        if (fmpEconData) {
+          rawData = fmpEconData;
+          prompt = ECON_PROMPT;
+          useSearch = false;
+          console.log("Econ: using FMP data");
+        } else {
+          // Web search fallback with Sonnet
+          rawData = "NO EXTERNAL DATA";
+          prompt = ECON_PROMPT + " TODAY IS " + dayName2 + " (" + todayStr2 + ")." +
+            " Search the web for USD economic reports released or scheduled for today " + todayStr2 + "." +
+            " Find actual values for Jobless Claims, Natural Gas Storage, and any other USD reports today." +
+            " Only include " + todayStr2 + " data.";
+          useSearch = true;
+          console.log("Econ: using web search");
+        }
       }
     } else if (topic === "earn") {
       prompt = EARN_PROMPT;
