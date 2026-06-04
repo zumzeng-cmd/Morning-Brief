@@ -77,24 +77,40 @@ async function fetchEconFMP() {
       "ism","purchasing manager","pmi","consumer confidence","sentiment","michigan",
       "crude oil","oil inventor","natural gas","eia","retail sales","durable"];
 
+    // Log first event to debug field names
+    if (json.length > 0) console.log("FMP econ sample:", JSON.stringify(json[0]));
+
     const usdEvents = json.filter(e => {
-      const name = (e.event || "").toLowerCase();
-      const country = (e.country || "").toUpperCase();
-      return country === "US" && important.some(k => name.includes(k));
+      const name = (e.event || e.indicator || e.name || "").toLowerCase();
+      const country = (e.country || e.countryCode || e.currency || "").toUpperCase();
+      // Match US, USD, United States, or empty (some APIs don't tag country for US data)
+      const isUSD = country === "US" || country === "USD" || country.includes("UNITED STATES") || country.includes("AMERICA");
+      return isUSD && important.some(k => name.includes(k));
     });
 
-    const eventsToUse = usdEvents.length > 0 ? usdEvents : json.filter(e => (e.country || "").toUpperCase() === "US");
-    if (eventsToUse.length === 0) return "No USD economic events found for " + todayStr;
+    // Fall back to all events if filter too strict
+    const eventsToUse = usdEvents.length > 0 ? usdEvents : json.filter(e => {
+      const country = (e.country || e.countryCode || e.currency || "").toUpperCase();
+      return country === "US" || country === "USD" || country.includes("UNITED");
+    });
+
+    if (eventsToUse.length === 0) {
+      console.log("FMP econ: no USD events found in", json.length, "total events");
+      return null;
+    }
 
     const lines = eventsToUse.map(e => {
+      const eventName = e.event || e.indicator || e.name || "Unknown";
       const act = (e.actual !== null && e.actual !== undefined) ? String(e.actual) : "TBD";
-      const est = (e.estimate !== null && e.estimate !== undefined) ? String(e.estimate) : "N/A";
-      const prev = e.previous ? " | Prev: " + e.previous : "";
+      const est = (e.estimate !== null && e.estimate !== undefined && e.estimate !== "") ? String(e.estimate) :
+                  (e.consensus !== null && e.consensus !== undefined) ? String(e.consensus) : "N/A";
+      const prev = (e.previous !== null && e.previous !== undefined) ? " | Prev: " + e.previous : "";
+      const impact = e.impact ? " [" + e.impact + "]" : "";
       let beat = "";
       if (act !== "TBD" && est !== "N/A") {
         beat = parseFloat(act) > parseFloat(est) ? " → BEAT" : parseFloat(act) < parseFloat(est) ? " → MISS" : " → IN-LINE";
       }
-      return (e.event || "") + " | Act: " + act + " vs Est: " + est + prev + beat;
+      return eventName + impact + " | Act: " + act + " vs Est: " + est + prev + beat;
     });
 
     return "FMP ECONOMIC CALENDAR FOR " + todayStr + ":\n" + lines.join("\n");
