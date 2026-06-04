@@ -260,7 +260,8 @@ const ECON_PROMPT = [
   "For each included report: name, actual vs forecast, beat or miss.",
   "MARKET REGIME (2025-2026): Inflation has cooled but remains above target. Fed is on hold. We are in GOOD NEWS IS GOOD NEWS mode — strong economic data = bullish for equities. Only flip bearish if inflation re-accelerates sharply.",
   "TIER 1 (dominates everything): Fed rate decision, FOMC, NFP, CPI, PCE. TIER 2 (high weight): JOLTS, Jobless Claims, ADP, Unemployment Rate, PPI. TIER 3 (medium): GDP, ISM, PMI, Sentiment. TIER 4 (lower): Oil/gas inventories, metals.",
-  "JOLTS beat = bullish (strong economy). Jobless Claims rising = bearish. Only score labor beats as bearish if CPI is hot simultaneously.",
+  "JOBLESS CLAIMS RULE: Initial Jobless Claims HIGHER than forecast = BEARISH (more people unemployed = labor weakening). Claims LOWER than forecast = BULLISH (fewer unemployed = strong labor). This is the opposite of most indicators — a higher number is bad. 225K vs 213K forecast = MISS = BEARISH.",
+  "JOLTS RULE: JOLTS job openings HIGHER than forecast = BULLISH (more demand for workers). JOLTS lower = bearish.",
   "TODAY-ONLY RULE: Only score reports confirmed released or scheduled for TODAY. Strictly ignore any reports from yesterday or earlier.",
   "MEGA-CAP STRICT RULE: any miss is a miss regardless of size.",
   "Score: bull=1, bear=-1, neutral=0."
