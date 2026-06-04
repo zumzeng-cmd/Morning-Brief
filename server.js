@@ -54,30 +54,76 @@ function stripHtml(html, maxLen) {
 
 // ── Data fetchers ─────────────────────────────────────────────
 async function fetchEcon() {
-  // Try ForexFactory first, fall back to investing.com economic calendar
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+  const FINNHUB_KEY = process.env.FINNHUB_API_KEY || "d8gh1phr01qlgcujfjfgd8gh1phr01qlgcujfjg0";
+
+  // High/medium impact USD events we care about
+  const IMPORTANT = [
+    "nonfarm","non-farm","payroll","jolts","jobless","unemployment","initial claim","continuing claim","adp",
+    "cpi","consumer price","ppi","producer price","pce","personal consumption",
+    "gdp","gross domestic",
+    "fomc","federal reserve","fed rate","interest rate","powell","monetary policy",
+    "ism manufacturing","ism services","ism non","pmi","purchasing manager",
+    "consumer confidence","consumer sentiment","michigan","umich",
+    "crude oil","oil inventori","natural gas","eia",
+    "retail sales","durable goods","industrial production","capacity utilization",
+    "trade balance","current account","housing start","building permit",
+    "gold fix","silver fix","copper","platinum","lme","london metal"
+  ];
+
   try {
-    const html = await fetchUrl("https://www.forexfactory.com/calendar");
-    const text = stripHtml(html, 4500);
-    // If we got blocked or got a login page, text will be short or missing calendar data
-    if (text.length > 500 && (text.includes("USD") || text.includes("GMT") || text.includes("forecast"))) {
-      return text;
+    const raw = await fetchUrl(
+      "https://finnhub.io/api/v1/calendar/economic?token=" + FINNHUB_KEY
+    );
+    const json = JSON.parse(raw);
+    const events = (json && json.economicCalendar) ? json.economicCalendar : [];
+
+    // Filter to today's events only
+    const todayEvents = events.filter(e => e.time && e.time.startsWith(todayStr));
+
+    // Filter to important USD events
+    const usdEvents = todayEvents.filter(e => {
+      const name = (e.event || "").toLowerCase();
+      const country = (e.country || "").toUpperCase();
+      const impact = (e.impact || "").toLowerCase();
+      // Include USD high/medium impact + London metals
+      const isUSD = country === "US" && (impact === "high" || impact === "medium");
+      const isLondonMetal = IMPORTANT.some(k => name.includes(k)) && (country === "GB" || country === "UK");
+      return isUSD || isLondonMetal;
+    });
+
+    if (usdEvents.length === 0) {
+      // Fall back to all today events if filter too strict
+      const allToday = todayEvents.filter(e => (e.country || "").toUpperCase() === "US");
+      if (allToday.length === 0) {
+        return "No USD economic events found in Finnhub for " + todayStr + ". Use your knowledge to recall any major scheduled reports today.";
+      }
+      return formatEconEvents(allToday, todayStr);
     }
-    throw new Error("ForexFactory returned insufficient data");
+
+    return formatEconEvents(usdEvents, todayStr);
+
   } catch(e) {
-    console.log("ForexFactory failed (" + e.message + "), trying Tradingeconomics...");
-    try {
-      const html2 = await fetchUrl("https://tradingeconomics.com/calendar", {
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-      });
-      const text2 = stripHtml(html2, 4500);
-      if (text2.length > 500) return text2;
-      throw new Error("TradingEconomics also blocked");
-    } catch(e2) {
-      console.log("TradingEconomics failed (" + e2.message + "), trying ISM/BLS direct...");
-      // Last resort: return a message so Claude uses its knowledge
-      return "Economic calendar scraping unavailable. Use your knowledge of today s date to recall any major USD economic reports scheduled or released today including NFP, CPI, JOLTS, ISM, GDP, Fed speeches, jobless claims, PCE, PPI. State what you know and score accordingly.";
-    }
+    console.log("Finnhub econ error:", e.message);
+    return "Economic data unavailable. Today is " + todayStr + ". Use your knowledge to recall major USD reports scheduled today (check for: jobless claims, NFP, CPI, JOLTS, ISM, GDP, Fed speeches, PCE, PPI, crude oil/natural gas inventories).";
   }
+}
+
+function formatEconEvents(events, todayStr) {
+  const lines = events.map(e => {
+    const time = e.time ? e.time.replace(todayStr + " ", "") : "";
+    const actual = (e.actual !== null && e.actual !== undefined) ? String(e.actual) : "TBD";
+    const estimate = (e.estimate !== null && e.estimate !== undefined) ? String(e.estimate) : "N/A";
+    const prev = (e.prev !== null && e.prev !== undefined) ? " | Prev: " + e.prev : "";
+    let beat = "";
+    if (actual !== "TBD" && estimate !== "N/A") {
+      beat = parseFloat(actual) > parseFloat(estimate) ? "BEAT" : parseFloat(actual) < parseFloat(estimate) ? "MISS" : "IN-LINE";
+    }
+    const impact = e.impact ? "[" + e.impact.toUpperCase() + "] " : "";
+    return impact + (e.event || "") + " | " + time + " | Act: " + actual + " vs Est: " + estimate + prev + (beat ? " → " + beat : "");
+  });
+  return "USD ECONOMIC CALENDAR FOR " + todayStr + ":\n" + lines.join("\n");
 }
 
 async function fetchEarnings() {
