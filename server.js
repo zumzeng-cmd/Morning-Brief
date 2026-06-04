@@ -161,17 +161,20 @@ async function fetchEarnings() {
     return tag + " " + tier + " " + r.symbol + " | EPS Act: " + epsAct + " vs Est: " + epsEst + " " + beat + rev + revEst + " | " + (r.hour || "");
   }
 
-  const yestAMC = yestRows.filter(r => r.hour && (r.hour.toLowerCase().includes("amc") || r.hour.toLowerCase().includes("after")));
-  const todayBMO = todayRows.filter(r => r.hour && (r.hour.toLowerCase().includes("bmo") || r.hour.toLowerCase().includes("before")));
-  const todayAll = todayRows;
+  // FMP doesn't always have time-of-day (AMC/BMO) — include all yesterday + today rows
+  // Yesterday rows = reported after yesterday close, moving today's market
+  // Today rows = reporting today BMO or during market
   const seen = new Set();
-  const combined = [...yestAMC, ...todayBMO, ...todayAll].filter(r => { if(seen.has(r.symbol)) return false; seen.add(r.symbol); return true; });
-  if (combined.length === 0) return "No earnings data from Finnhub for " + yestStr + " or " + todayStr + ".";
+  const combined = [...yestRows, ...todayRows].filter(r => {
+    if(seen.has(r.symbol)) return false;
+    seen.add(r.symbol);
+    return true;
+  });
+  if (combined.length === 0) return "No earnings data from FMP for " + yestStr + " or " + todayStr + ".";
   combined.sort((a, b) => { const aS = MEGA.includes(a.symbol)?0:LARGE.includes(a.symbol)?1:2; const bS = MEGA.includes(b.symbol)?0:LARGE.includes(b.symbol)?1:2; return aS-bS; });
   const lines = combined.slice(0, 40).map(r => {
-    const isYestAMC = yestAMC.some(y => y.symbol === r.symbol);
-    const isTodayBMO = todayBMO.some(b => b.symbol === r.symbol);
-    const tag = isYestAMC ? "[YEST AMC]" : isTodayBMO ? "[TODAY BMO]" : "[TODAY]";
+    const isYest = yestRows.some(y => y.symbol === r.symbol);
+    const tag = isYest ? "[YEST]" : "[TODAY]";
     return formatRow(r, tag);
   });
   const nonGaapNote = "NOTE: Mega-caps like AVGO, NVDA, AAPL report non-GAAP adjusted EPS. MEGA-CAP STRICT RULE: any miss is a miss regardless of size.";
