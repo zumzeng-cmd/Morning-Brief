@@ -315,26 +315,26 @@ app.post("/api/analyze", async function(req, res) {
     var rawData, prompt, useSearch = false;
 
     if (topic === "econ") {
-      prompt = ECON_PROMPT;
+      const today2 = new Date();
+      const todayStr2 = today2.toISOString().slice(0, 10);
+      const dayName2 = today2.toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
+
       if (latestMakeData.econ && latestMakeData.econ.length > 100) {
+        // Make.com has good data
         rawData = latestMakeData.econ;
+        prompt = ECON_PROMPT;
+        useSearch = false;
         console.log("Econ: using Make.com data");
       } else {
-        // Try FMP economic calendar first
-        const fmpEcon = await fetchEconFMP();
-        if (fmpEcon) {
-          rawData = fmpEcon;
-          console.log("Econ: using FMP data");
-        } else {
-          // Fall back to web search
-          const today2 = new Date();
-          const todayStr2 = today2.toISOString().slice(0, 10);
-          const dayName2 = today2.toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
-          rawData = "NO EXTERNAL DATA";
-          prompt = ECON_PROMPT + " TODAY IS " + dayName2 + " (" + todayStr2 + "). Search the web for USD economic reports released or scheduled for " + todayStr2 + ". Find actual values for: Initial Jobless Claims, Continuing Claims, Natural Gas Storage, Crude Oil Inventories, and any other USD high/medium impact reports today. For each report state: name, actual, estimate, beat/miss. Only include " + todayStr2 + " data.";
-          useSearch = true;
-          console.log("Econ: using web search fallback");
-        }
+        // Always use web search for econ — most reliable for live data
+        rawData = "NO EXTERNAL DATA";
+        prompt = ECON_PROMPT + " TODAY IS " + dayName2 + " (" + todayStr2 + ")." +
+          " Search the web NOW for: USD economic reports released or scheduled for today " + todayStr2 + "." +
+          " Search specifically for: 'Initial Jobless Claims " + todayStr2 + "' AND 'Natural Gas Storage EIA " + todayStr2 + "' AND 'economic calendar " + todayStr2 + "'." +
+          " Report the actual numbers released today with beat/miss vs forecast." +
+          " Only include reports for " + todayStr2 + ".";
+        useSearch = true;
+        console.log("Econ: using web search");
       }
     } else if (topic === "earn") {
       prompt = EARN_PROMPT;
