@@ -276,7 +276,9 @@ const EARN_PROMPT = [
   "MEGA-CAP STRICT RULE: any miss is a miss regardless of size. Trust the BEAT/MISS/IN-LINE label in the data.",
   "CRITICAL: Only score based on CONFIRMED actual EPS in the data. If all TBD, score 0 neutral — do NOT guess.",
   "IN-LINE RULE: IN-LINE for a mega-cap = neutral. Revenue beats/misses also factor in.",
-  "Score: bull=1, bear=-1, neutral=0."
+  "FORWARD GUIDANCE RULE: For mega-caps, forward guidance is often MORE important than the EPS beat/miss. Strong guidance that beats consensus = add +0.5 to score. Weak or below-consensus guidance = subtract 0.5. Reaffirmed full-year targets = mild positive. If guidance is included in the data, factor it into your summary and score.",
+  "SUMMARY RULE: For any mega-cap result, your summary must include: (1) EPS beat/miss, (2) revenue beat/miss, (3) forward guidance vs consensus if available, (4) any key metric like AI revenue, cloud growth, or segment performance that moves NQ/ES.",
+  "Score: bull=1, bear=-1, neutral=0. You may use 0.5 increments when guidance meaningfully changes the picture."
 ].join(" ");
 
 const PREMARKET_PROMPT = [
@@ -385,7 +387,7 @@ app.post("/api/analyze", async function(req, res) {
         const hasMegaActuals = rawData && (rawData.includes("BEAT") || rawData.includes("MISS") || rawData.includes("IN-LINE")) && (rawData.includes("AVGO") || rawData.includes("NVDA") || rawData.includes("AAPL") || rawData.includes("MSFT") || rawData.includes("META"));
         if (!hasMegaActuals) {
           // Supplement with web search for recent mega-cap results
-          prompt = EARN_PROMPT + " Search the web for major S&P500/Nasdaq earnings reported on " + yestStr3 + " AMC or " + todayStr3 + " BMO. Focus on AVGO, NVDA, AAPL, MSFT, META, GOOGL, AMZN, TSLA, NFLX, AMD and major banks. State EPS actual vs estimate and beat/miss. Also include this API data: " + (rawData || "none");
+          prompt = EARN_PROMPT + " Search the web for major S&P500/Nasdaq earnings reported on " + yestStr3 + " AMC or " + todayStr3 + " BMO. Focus on AVGO, NVDA, AAPL, MSFT, META, GOOGL, AMZN, TSLA, NFLX, AMD and major banks. For each company found state: EPS actual vs estimate (beat/miss), revenue actual vs estimate, AND forward guidance vs consensus — guidance often moves the stock more than EPS. Also include this API data: " + (rawData || "none");
           useSearch = true;
           console.log("Earnings: using web search for mega-cap results");
         }
