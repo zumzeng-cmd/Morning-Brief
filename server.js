@@ -214,7 +214,8 @@ function callClaude(prompt, data, useWebSearch) {
     const body = {
       model: useWebSearch ? "claude-sonnet-4-6" : "claude-haiku-4-5-20251001",
       max_tokens: 500,
-      system: "You are a futures trader morning briefing assistant. Today is " + today + ". CRITICAL: Reply ONLY with raw JSON, no markdown, no backticks, no explanation. Format: {\"signal\":\"bull\",\"summary\":\"2 sentence summary\",\"score\":1} where signal is bull/bear/neutral and score is 1/-1/0.",
+      // ── MODIFIED: added "guidance" field to the JSON schema description ──
+      system: "You are a futures trader morning briefing assistant. Today is " + today + ". CRITICAL: Reply ONLY with raw JSON, no markdown, no backticks, no explanation. Format: {\"signal\":\"bull\",\"summary\":\"2 sentence summary\",\"score\":1,\"guidance\":null} where signal is bull/bear/neutral, score is 1/-1/0, and guidance is a one-sentence forward guidance note (for earnings topics only) or null if not applicable.",
       messages: [{ role: "user", content: prompt + (data && data !== "NO EXTERNAL DATA" ? "\n\nDATA:\n" + data : "") }]
     };
     if (useWebSearch) body.tools = [{ type: "web_search_20250305", name: "web_search" }];
@@ -239,8 +240,10 @@ function callClaude(prompt, data, useWebSearch) {
           const result = JSON.parse(cleaned);
           // Ensure result has required fields — if Claude returned an error object, normalize it
           if (!result.signal || !result.hasOwnProperty("score")) {
-            resolve({ signal: "neutral", summary: "Could not fetch data. Use override buttons to set manually.", score: 0 });
+            resolve({ signal: "neutral", summary: "Could not fetch data. Use override buttons to set manually.", score: 0, guidance: null });
           } else {
+            // ── MODIFIED: ensure guidance key always exists (null if not returned) ──
+            if (!result.hasOwnProperty("guidance")) result.guidance = null;
             resolve(result);
           }
         } catch(e) { reject(new Error("Parse error: " + e.message)); }
@@ -264,7 +267,9 @@ const ECON_PROMPT = [
   "JOLTS RULE: JOLTS job openings HIGHER than forecast = BULLISH (more demand for workers). JOLTS lower = bearish.",
   "TODAY-ONLY RULE: Only score reports confirmed released or scheduled for TODAY. Strictly ignore any reports from yesterday or earlier.",
   "MEGA-CAP STRICT RULE: any miss is a miss regardless of size.",
-  "Score: bull=1, bear=-1, neutral=0."
+  "Score: bull=1, bear=-1, neutral=0.",
+  // ── MODIFIED: guidance is not applicable for econ, explicitly set null ──
+  "JSON SCHEMA: {\"signal\":\"bull|bear|neutral\",\"summary\":\"2 sentence summary\",\"score\":1,\"guidance\":null}"
 ].join(" ");
 
 const EARN_PROMPT = [
@@ -278,14 +283,18 @@ const EARN_PROMPT = [
   "IN-LINE RULE: IN-LINE for a mega-cap = neutral. Revenue beats/misses also factor in.",
   "FORWARD GUIDANCE RULE: For mega-caps, forward guidance is often MORE important than the EPS beat/miss. Strong guidance that beats consensus = add +0.5 to score. Weak or below-consensus guidance = subtract 0.5. Reaffirmed full-year targets = mild positive. If guidance is included in the data, factor it into your summary and score.",
   "SUMMARY RULE: For any mega-cap result, your summary must include: (1) EPS beat/miss, (2) revenue beat/miss, (3) forward guidance vs consensus if available, (4) any key metric like AI revenue, cloud growth, or segment performance that moves NQ/ES.",
-  "Score: bull=1, bear=-1, neutral=0. You may use 0.5 increments when guidance meaningfully changes the picture."
+  "Score: bull=1, bear=-1, neutral=0. You may use 0.5 increments when guidance meaningfully changes the picture.",
+  // ── MODIFIED: explicit JSON schema requiring guidance field ──
+  "JSON SCHEMA: {\"signal\":\"bull|bear|neutral\",\"summary\":\"2 sentence summary\",\"score\":1,\"guidance\":\"One sentence on forward guidance vs consensus — include specific numbers if available (e.g. Q3 revenue guided $X vs $Y consensus). Set to null only if absolutely no guidance data is present in the source material.\"}"
 ].join(" ");
 
 const PREMARKET_PROMPT = [
   "From this CNBC data extract Asia and Europe overnight market performance and US futures direction (NQ, ES, DOW, YM).",
   "Name specific index levels or % changes if visible.",
   "Score: bull if majority green, bear if majority red, neutral if mixed.",
-  "Score: bull=1, bear=-1, neutral=0."
+  "Score: bull=1, bear=-1, neutral=0.",
+  // ── MODIFIED: guidance is not applicable for premarket ──
+  "JSON SCHEMA: {\"signal\":\"bull|bear|neutral\",\"summary\":\"2 sentence summary\",\"score\":1,\"guidance\":null}"
 ].join(" ");
 
 const NEWS_PROMPT = [
@@ -296,7 +305,9 @@ const NEWS_PROMPT = [
   "LEVEL 2 - MEDIUM: Sector news, individual large-cap catalyst.",
   "LEVEL 1 - LOW (do not score): Routine analyst calls, minor company news.",
   "IMPORTANT: Do NOT include level labels like Level 3 or Level 4 in your summary text. Write natural plain English.",
-  "Score: bull=1, bear=-1, neutral=0."
+  "Score: bull=1, bear=-1, neutral=0.",
+  // ── MODIFIED: guidance is not applicable for news ──
+  "JSON SCHEMA: {\"signal\":\"bull|bear|neutral\",\"summary\":\"2 sentence summary\",\"score\":1,\"guidance\":null}"
 ].join(" ");
 
 // ── Make.com intake endpoint ──────────────────────────────────
@@ -386,8 +397,8 @@ app.post("/api/analyze", async function(req, res) {
         // Check if FMP has mega-cap actual data
         const hasMegaActuals = rawData && (rawData.includes("BEAT") || rawData.includes("MISS") || rawData.includes("IN-LINE")) && (rawData.includes("AVGO") || rawData.includes("NVDA") || rawData.includes("AAPL") || rawData.includes("MSFT") || rawData.includes("META"));
         if (!hasMegaActuals) {
-          // Supplement with web search for recent mega-cap results
-          prompt = EARN_PROMPT + " Search the web for major S&P500/Nasdaq earnings reported on " + yestStr3 + " AMC or " + todayStr3 + " BMO. Focus on AVGO, NVDA, AAPL, MSFT, META, GOOGL, AMZN, TSLA, NFLX, AMD and major banks. For each company found state: EPS actual vs estimate (beat/miss), revenue actual vs estimate, AND forward guidance vs consensus — guidance often moves the stock more than EPS. Also include this API data: " + (rawData || "none");
+          // ── MODIFIED: web search prompt now explicitly asks for guidance data ──
+          prompt = EARN_PROMPT + " Search the web for major S&P500/Nasdaq earnings reported on " + yestStr3 + " AMC or " + todayStr3 + " BMO. Focus on AVGO, NVDA, AAPL, MSFT, META, GOOGL, AMZN, TSLA, NFLX, AMD and major banks. For each company found state: EPS actual vs estimate (beat/miss), revenue actual vs estimate, AND forward guidance vs consensus — include specific guided figures (e.g. Q3 revenue $X guided vs $Y consensus) as guidance often moves the stock more than EPS. Also include this API data: " + (rawData || "none");
           useSearch = true;
           console.log("Earnings: using web search for mega-cap results");
         }
