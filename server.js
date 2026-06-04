@@ -193,7 +193,7 @@ function callClaude(prompt, data, useWebSearch) {
   return new Promise((resolve, reject) => {
     const today = new Date().toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
     const body = {
-      model: "claude-haiku-4-5-20251001",
+      model: useWebSearch ? "claude-sonnet-4-6" : "claude-haiku-4-5-20251001",
       max_tokens: 500,
       system: "You are a futures trader morning briefing assistant. Today is " + today + ". CRITICAL: Reply ONLY with raw JSON, no markdown, no backticks, no explanation. Format: {\"signal\":\"bull\",\"summary\":\"2 sentence summary\",\"score\":1} where signal is bull/bear/neutral and score is 1/-1/0.",
       messages: [{ role: "user", content: prompt + (data && data !== "NO EXTERNAL DATA" ? "\n\nDATA:\n" + data : "") }]
@@ -338,8 +338,24 @@ app.post("/api/analyze", async function(req, res) {
       }
     } else if (topic === "earn") {
       prompt = EARN_PROMPT;
-      rawData = latestMakeData.earnings || await fetchEarnings();
-      if (latestMakeData.earnings) console.log("Earnings: using Make.com data");
+      const today3 = new Date();
+      const todayStr3 = today3.toISOString().slice(0, 10);
+      const yest3 = new Date(today3); yest3.setDate(yest3.getDate()-1);
+      const yestStr3 = yest3.toISOString().slice(0, 10);
+      if (latestMakeData.earnings && latestMakeData.earnings.length > 50) {
+        rawData = latestMakeData.earnings;
+        console.log("Earnings: using Make.com data");
+      } else {
+        rawData = await fetchEarnings();
+        // Check if FMP has mega-cap actual data
+        const hasMegaActuals = rawData && (rawData.includes("BEAT") || rawData.includes("MISS") || rawData.includes("IN-LINE")) && (rawData.includes("AVGO") || rawData.includes("NVDA") || rawData.includes("AAPL") || rawData.includes("MSFT") || rawData.includes("META"));
+        if (!hasMegaActuals) {
+          // Supplement with web search for recent mega-cap results
+          prompt = EARN_PROMPT + " Search the web for major S&P500/Nasdaq earnings reported on " + yestStr3 + " AMC or " + todayStr3 + " BMO. Focus on AVGO, NVDA, AAPL, MSFT, META, GOOGL, AMZN, TSLA, NFLX, AMD and major banks. State EPS actual vs estimate and beat/miss. Also include this API data: " + (rawData || "none");
+          useSearch = true;
+          console.log("Earnings: using web search for mega-cap results");
+        }
+      }
     } else if (topic === "premarket") {
       prompt = PREMARKET_PROMPT;
       rawData = latestMakeData.premarket || await fetchPremarket();
