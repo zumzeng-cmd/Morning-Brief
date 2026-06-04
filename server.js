@@ -62,7 +62,7 @@ async function fetchEconFMP() {
 
   try {
     const raw = await fetchUrl(
-      "https://financialmodelingprep.com/api/v3/economic_calendar?from=" + todayStr + "&to=" + todayStr + "&apikey=" + FMP_KEY
+      "https://financialmodelingprep.com/stable/economic-calendar?from=" + todayStr + "&to=" + todayStr + "&apikey=" + FMP_KEY
     );
     const json = JSON.parse(raw);
     if (!Array.isArray(json) || json.length === 0) {
@@ -115,7 +115,7 @@ async function fetchEarnings() {
   async function fetchFMP(from, to) {
     try {
       const raw = await fetchUrl(
-        "https://financialmodelingprep.com/api/v3/earning_calendar?from=" + from + "&to=" + to + "&apikey=" + FMP_KEY
+        "https://financialmodelingprep.com/stable/earnings-calendar?from=" + from + "&to=" + to + "&apikey=" + FMP_KEY
       );
       const json = JSON.parse(raw);
       if (!Array.isArray(json)) { console.log("FMP earnings error:", JSON.stringify(json).slice(0,100)); return []; }
@@ -193,7 +193,7 @@ function callClaude(prompt, data, useWebSearch) {
   return new Promise((resolve, reject) => {
     const today = new Date().toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
     const body = {
-      model: useWebSearch ? "claude-sonnet-4-6" : "claude-haiku-4-5-20251001",
+      model: "claude-haiku-4-5-20251001",
       max_tokens: 500,
       system: "You are a futures trader morning briefing assistant. Today is " + today + ". CRITICAL: Reply ONLY with raw JSON, no markdown, no backticks, no explanation. Format: {\"signal\":\"bull\",\"summary\":\"2 sentence summary\",\"score\":1} where signal is bull/bear/neutral and score is 1/-1/0.",
       messages: [{ role: "user", content: prompt + (data && data !== "NO EXTERNAL DATA" ? "\n\nDATA:\n" + data : "") }]
@@ -333,8 +333,8 @@ app.post("/api/analyze", async function(req, res) {
           " Search specifically for: 'Initial Jobless Claims " + todayStr2 + "' AND 'Natural Gas Storage EIA " + todayStr2 + "' AND 'economic calendar " + todayStr2 + "'." +
           " Report the actual numbers released today with beat/miss vs forecast." +
           " Only include reports for " + todayStr2 + ".";
-        useSearch = true;
-        console.log("Econ: using web search");
+        useSearch = false;
+        console.log("Econ: using Claude knowledge");
       }
     } else if (topic === "earn") {
       prompt = EARN_PROMPT;
