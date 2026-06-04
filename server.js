@@ -309,7 +309,19 @@ app.post("/api/analyze", async function(req, res) {
   console.log("Analyzing:", topic);
   try {
     var rawData, prompt;
-    if      (topic === "econ")      { rawData = await fetchEcon();      prompt = ECON_PROMPT; }
+    if (topic === "econ") {
+      const today2 = new Date();
+      const todayStr2 = today2.toISOString().slice(0, 10);
+      const dayName2 = today2.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+      rawData = "NO EXTERNAL DATA — use your knowledge only.";
+      prompt = ECON_PROMPT + " TODAY IS " + dayName2 + " (" + todayStr2 + ")." +
+        " Using your knowledge of the US economic release calendar, identify ALL USD economic reports" +
+        " that are scheduled or were released on " + todayStr2 + "." +
+        " Note: holiday-shifted releases are common — do not assume a report fell on its typical day." +
+        " Search broadly across all categories: labor, inflation, growth, Fed, manufacturing, sentiment, energy inventories, London metals." +
+        " For each report state: name, scheduled time (ET), actual value if released, estimate, and beat/miss." +
+        " Mark unreleased reports as UPCOMING. Only include " + todayStr2 + " — exclude all other dates.";
+    }
     else if (topic === "earn")      { rawData = await fetchEarnings();   prompt = EARN_PROMPT; }
     else if (topic === "premarket") { rawData = await fetchPremarket();  prompt = PREMARKET_PROMPT; }
     else if (topic === "news")      { rawData = await fetchNews();       prompt = NEWS_PROMPT; }
