@@ -255,7 +255,7 @@ const EARN_PROMPT = [
   "LARGE-CAP HIGH IMPACT (significant weight): JPM, GS, BAC, MS, V, MA, UNH, LLY, JNJ, XOM, CVX, CRM, ORCL, ADBE, QCOM, MU, INTC, NOW.",
   "SECTOR BELLWETHERS (medium weight - moves sector not full index): Any company that is the largest in its sector.",
   "SMALL/MID CAP (low weight - ignore unless massive beat/miss): Everything else.",
-  "SCORING LOGIC: If a mega-cap beats big = strong bull. If a mega-cap misses = strong bear. Multiple large-caps beating with no mega-cap = mild bull. All TBD = neutral. Mixed mega-caps = neutral.","DATA SOURCE: StockAnalysis.com which reports non-GAAP adjusted EPS — the same basis analysts use for estimates. This is the correct number to compare against consensus estimates.",
+  "SCORING LOGIC: If a mega-cap beats big = strong bull. If a mega-cap misses = strong bear. Multiple large-caps beating with no mega-cap = mild bull. All TBD = neutral. Mixed mega-caps = neutral.","CRITICAL RULE: Only score based on CONFIRMED actual EPS figures in the data provided. If epsActual shows TBD for all companies, score 0 neutral - do NOT use your own knowledge to guess results. Do not infer or assume any company beat or missed unless the actual number is explicitly in the data. If data shows all TBD, say so and score neutral.","DATA SOURCE: StockAnalysis.com which reports non-GAAP adjusted EPS — the same basis analysts use for estimates. This is the correct number to compare against consensus estimates.",
   "In your summary, lead with the mega-cap and large-cap results first. Mention the company name and whether it beat or missed. Ignore or briefly mention small caps.",
   "Score: 1 (bull), -1 (bear), 0 (neutral)."
 ].join(" ");
