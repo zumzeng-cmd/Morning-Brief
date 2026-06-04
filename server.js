@@ -106,8 +106,32 @@ async function fetchEarnings() {
     fetchFinnhub(yestStr, yestStr)
   ]);
 
-  const MEGA = ["NVDA","AAPL","MSFT","META","GOOGL","GOOG","AMZN","TSLA","AVGO","NFLX","AMD"];
-  const LARGE = ["JPM","GS","BAC","MS","V","MA","UNH","LLY","CRM","ORCL","ADBE","QCOM","MU","NOW","INTC","XOM","CVX"];
+  // Mega-caps that single-handedly move NQ/ES
+  const MEGA = ["NVDA","AAPL","MSFT","META","GOOGL","GOOG","AMZN","TSLA","AVGO","NFLX","AMD","BROADCOM"];
+
+  // Large-caps with significant index impact — banks, financials, tech, healthcare, energy, retail, industrials
+  const LARGE = [
+    // Banks & Financials
+    "JPM","GS","BAC","MS","WFC","C","BLK","SCHW","AXP","CB","MMC","PGR","MET","PRU","TRV","BK","STT",
+    // Payments
+    "V","MA","PYPL","SQ",
+    // Tech & Semis
+    "CRM","ORCL","ADBE","QCOM","MU","NOW","INTC","TXN","AMAT","LRCX","KLAC","MRVL","ARM","PANW","SNOW","PLTR",
+    // Healthcare & Pharma
+    "UNH","LLY","JNJ","PFE","ABBV","MRK","BMY","AMGN","GILD","CVS","CI","HUM","ELV","ISRG","MDT","ABT",
+    // Energy
+    "XOM","CVX","COP","SLB","EOG","PSX","VLO","MPC",
+    // Retail & Consumer
+    "WMT","AMZN","HD","COST","TGT","LOW","NKE","SBUX","MCD","YUM",
+    // Industrials & Defense
+    "BA","CAT","GE","HON","MMM","RTX","LMT","NOC","DE","UPS","FDX",
+    // Comm & Media
+    "DIS","CMCSA","T","VZ","NFLX","SNAP","UBER","LYFT",
+    // Autos
+    "F","GM","RIVN",
+    // REITs & Utilities (less impact but included)
+    "AMT","PLD","NEE"
+  ];
 
   function formatRow(r, tag) {
     const isMega = MEGA.includes(r.symbol);
