@@ -54,8 +54,30 @@ function stripHtml(html, maxLen) {
 
 // ── Data fetchers ─────────────────────────────────────────────
 async function fetchEcon() {
-  const html = await fetchUrl("https://www.forexfactory.com/calendar");
-  return stripHtml(html, 4500);
+  // Try ForexFactory first, fall back to investing.com economic calendar
+  try {
+    const html = await fetchUrl("https://www.forexfactory.com/calendar");
+    const text = stripHtml(html, 4500);
+    // If we got blocked or got a login page, text will be short or missing calendar data
+    if (text.length > 500 && (text.includes("USD") || text.includes("GMT") || text.includes("forecast"))) {
+      return text;
+    }
+    throw new Error("ForexFactory returned insufficient data");
+  } catch(e) {
+    console.log("ForexFactory failed (" + e.message + "), trying Tradingeconomics...");
+    try {
+      const html2 = await fetchUrl("https://tradingeconomics.com/calendar", {
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+      });
+      const text2 = stripHtml(html2, 4500);
+      if (text2.length > 500) return text2;
+      throw new Error("TradingEconomics also blocked");
+    } catch(e2) {
+      console.log("TradingEconomics failed (" + e2.message + "), trying ISM/BLS direct...");
+      // Last resort: return a message so Claude uses its knowledge
+      return "Economic calendar scraping unavailable. Use your knowledge of today s date to recall any major USD economic reports scheduled or released today including NFP, CPI, JOLTS, ISM, GDP, Fed speeches, jobless claims, PCE, PPI. State what you know and score accordingly.";
+    }
+  }
 }
 
 async function fetchEarnings() {
