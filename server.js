@@ -87,35 +87,29 @@ async function fetchEarnings() {
   const todayStr = today.toISOString().slice(0, 10);
   const yestStr = yesterday.toISOString().slice(0, 10);
 
-  async function fetchDay(dateStr) {
+  async function fetchStockAnalysis(dateStr) {
     try {
-      const raw = await fetchUrl("https://api.nasdaq.com/api/calendar/earnings?date=" + dateStr, {
-        "Origin": "https://www.nasdaq.com", "Referer": "https://www.nasdaq.com/"
+      const html = await fetchUrl("https://stockanalysis.com/earnings-calendar/?date=" + dateStr, {
+        "Accept": "text/html,application/xhtml+xml",
+        "Referer": "https://stockanalysis.com/"
       });
-      const json = JSON.parse(raw);
-      return (json && json.data && json.data.rows) ? json.data.rows : [];
-    } catch(e) { return []; }
+      return stripHtml(html, 4000);
+    } catch(e) { return ""; }
   }
 
-  const [todayRows, yestRows] = await Promise.all([fetchDay(todayStr), fetchDay(yestStr)]);
-  const yestAMC = yestRows.filter(r => r.time && r.time.toLowerCase().includes("after"));
-  const todayBMO = todayRows.filter(r => r.time && r.time.toLowerCase().includes("before"));
-  const todayOther = todayRows.filter(r => !r.time || !r.time.toLowerCase().includes("before"));
-  const combined = [...yestAMC, ...todayBMO, ...todayOther];
-  const seen = new Set();
-  const unique = combined.filter(r => { if(seen.has(r.symbol)) return false; seen.add(r.symbol); return true; });
-  if (unique.length === 0) return "No earnings data available for " + todayStr;
-  const lines = unique.slice(0, 30).map(function(r) {
-    const isYestAMC = yestAMC.some(y => y.symbol === r.symbol);
-    const isTodayBMO = todayBMO.some(b => b.symbol === r.symbol);
-    const tag = isYestAMC ? "[YEST AMC]" : isTodayBMO ? "[TODAY BMO]" : "[TODAY]";
-    var beat = "";
-    if (r.eps && r.epsForecast) {
-      beat = parseFloat(r.eps) > parseFloat(r.epsForecast) ? "BEAT" : parseFloat(r.eps) < parseFloat(r.epsForecast) ? "MISS" : "IN-LINE";
-    }
-    return tag + " " + r.symbol + " | Est: " + (r.epsForecast || "N/A") + " | Act: " + (r.eps || "TBD") + " " + beat + " | " + (r.time || "");
-  });
-  return "EARNINGS (" + yestStr + " AMC + " + todayStr + "):\n" + lines.join("\n");
+  const [todayData, yestData] = await Promise.all([
+    fetchStockAnalysis(todayStr),
+    fetchStockAnalysis(yestStr)
+  ]);
+
+  const combined = "=== YESTERDAY (" + yestStr + ") AFTER CLOSE ===\n" + yestData +
+    "\n\n=== TODAY (" + todayStr + ") ===\n" + todayData;
+
+  if (todayData.length < 100 && yestData.length < 100) {
+    return "Earnings data unavailable from StockAnalysis. No data to score.";
+  }
+
+  return combined;
 }
 
 async function fetchPremarket() {
@@ -195,7 +189,7 @@ const EARN_PROMPT = [
   "LARGE-CAP HIGH IMPACT (significant weight): JPM, GS, BAC, MS, V, MA, UNH, LLY, JNJ, XOM, CVX, CRM, ORCL, ADBE, QCOM, MU, INTC, NOW.",
   "SECTOR BELLWETHERS (medium weight - moves sector not full index): Any company that is the largest in its sector.",
   "SMALL/MID CAP (low weight - ignore unless massive beat/miss): Everything else.",
-  "SCORING LOGIC: If a mega-cap beats big = strong bull. If a mega-cap misses = strong bear. Multiple large-caps beating with no mega-cap = mild bull. All TBD = neutral. Mixed mega-caps = neutral.",
+  "SCORING LOGIC: If a mega-cap beats big = strong bull. If a mega-cap misses = strong bear. Multiple large-caps beating with no mega-cap = mild bull. All TBD = neutral. Mixed mega-caps = neutral.","DATA SOURCE: StockAnalysis.com which reports non-GAAP adjusted EPS — the same basis analysts use for estimates. This is the correct number to compare against consensus estimates.",
   "In your summary, lead with the mega-cap and large-cap results first. Mention the company name and whether it beat or missed. Ignore or briefly mention small caps.",
   "Score: 1 (bull), -1 (bear), 0 (neutral)."
 ].join(" ");
