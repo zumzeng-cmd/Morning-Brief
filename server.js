@@ -207,7 +207,7 @@ function callClaude(prompt, data, useWebSearch) {
   return new Promise((resolve, reject) => {
     const today = new Date().toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
     const body = {
-      model: "claude-sonnet-4-6",
+      model: useWebSearch ? "claude-sonnet-4-6" : "claude-haiku-4-5-20251001",
       max_tokens: 500,
       system: "You are a futures trader morning briefing assistant. Today is " + today + ". CRITICAL: Reply ONLY with raw JSON, no markdown, no backticks, no explanation. Format: {\"signal\":\"bull\",\"summary\":\"2 sentence summary\",\"score\":1} where signal is bull/bear/neutral and score is 1/-1/0.",
       messages: [{ role: "user", content: prompt + (data && data !== "NO EXTERNAL DATA — use your knowledge only." ? "\n\nDATA:\n" + data : "") }]
@@ -224,6 +224,7 @@ function callClaude(prompt, data, useWebSearch) {
         "anthropic-beta": "web-search-2025-03-05"
       }
     };
+    if (!useWebSearch) delete options.headers["anthropic-beta"];
     const req = https.request(options, res => {
       let raw = "";
       res.on("data", c => raw += c);
