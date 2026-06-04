@@ -55,23 +55,83 @@ function stripHtml(html, maxLen) {
 }
 
 // ── Data fetchers (fallbacks when Make.com not available) ─────
+async function fetchEconFMP() {
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+  const FMP_KEY = process.env.FMP_API_KEY || "WQMcZiIIJ1rarvN3puluUNQoGXFdvkjg";
+
+  try {
+    const raw = await fetchUrl(
+      "https://financialmodelingprep.com/api/v3/economic_calendar?from=" + todayStr + "&to=" + todayStr + "&apikey=" + FMP_KEY
+    );
+    const json = JSON.parse(raw);
+    if (!Array.isArray(json) || json.length === 0) {
+      console.log("FMP econ: no events today");
+      return null;
+    }
+
+    // Filter to high/medium impact USD events
+    const important = ["nonfarm","payroll","jobless","claims","unemployment","jolts","adp",
+      "cpi","consumer price","ppi","producer price","pce","personal consumption",
+      "gdp","gross domestic","fomc","federal reserve","fed rate","interest rate",
+      "ism","purchasing manager","pmi","consumer confidence","sentiment","michigan",
+      "crude oil","oil inventor","natural gas","eia","retail sales","durable"];
+
+    const usdEvents = json.filter(e => {
+      const name = (e.event || "").toLowerCase();
+      const country = (e.country || "").toUpperCase();
+      return country === "US" && important.some(k => name.includes(k));
+    });
+
+    const eventsToUse = usdEvents.length > 0 ? usdEvents : json.filter(e => (e.country || "").toUpperCase() === "US");
+    if (eventsToUse.length === 0) return "No USD economic events found for " + todayStr;
+
+    const lines = eventsToUse.map(e => {
+      const act = (e.actual !== null && e.actual !== undefined) ? String(e.actual) : "TBD";
+      const est = (e.estimate !== null && e.estimate !== undefined) ? String(e.estimate) : "N/A";
+      const prev = e.previous ? " | Prev: " + e.previous : "";
+      let beat = "";
+      if (act !== "TBD" && est !== "N/A") {
+        beat = parseFloat(act) > parseFloat(est) ? " → BEAT" : parseFloat(act) < parseFloat(est) ? " → MISS" : " → IN-LINE";
+      }
+      return (e.event || "") + " | Act: " + act + " vs Est: " + est + prev + beat;
+    });
+
+    return "FMP ECONOMIC CALENDAR FOR " + todayStr + ":\n" + lines.join("\n");
+  } catch(e) {
+    console.log("FMP econ error:", e.message);
+    return null;
+  }
+}
+
 async function fetchEarnings() {
   const today = new Date();
   const yesterday = new Date(today);
   yesterday.setDate(yesterday.getDate() - 1);
   const todayStr = today.toISOString().slice(0, 10);
   const yestStr = yesterday.toISOString().slice(0, 10);
-  const FINNHUB_KEY = process.env.FINNHUB_API_KEY || "d8gh1phr01qlgcujfjfgd8gh1phr01qlgcujfjg0";
+  const FMP_KEY = process.env.FMP_API_KEY || "WQMcZiIIJ1rarvN3puluUNQoGXFdvkjg";
 
-  async function fetchFinnhub(from, to) {
+  async function fetchFMP(from, to) {
     try {
-      const raw = await fetchUrl("https://finnhub.io/api/v1/calendar/earnings?from=" + from + "&to=" + to + "&token=" + FINNHUB_KEY);
+      const raw = await fetchUrl(
+        "https://financialmodelingprep.com/api/v3/earning_calendar?from=" + from + "&to=" + to + "&apikey=" + FMP_KEY
+      );
       const json = JSON.parse(raw);
-      return (json && json.earningsCalendar) ? json.earningsCalendar : [];
-    } catch(e) { console.log("Finnhub error:", e.message); return []; }
+      if (!Array.isArray(json)) { console.log("FMP earnings error:", JSON.stringify(json).slice(0,100)); return []; }
+      // Convert FMP format to our expected format
+      return json.map(r => ({
+        symbol: r.symbol,
+        epsActual: r.eps,
+        epsEstimate: r.epsEstimated,
+        revenueActual: r.revenue,
+        revenueEstimate: r.revenueEstimated,
+        hour: r.time || ""
+      }));
+    } catch(e) { console.log("FMP earnings error:", e.message); return []; }
   }
 
-  const [todayRows, yestRows] = await Promise.all([fetchFinnhub(todayStr, todayStr), fetchFinnhub(yestStr, yestStr)]);
+  const [todayRows, yestRows] = await Promise.all([fetchFMP(todayStr, todayStr), fetchFMP(yestStr, yestStr)]);
   const MEGA = ["NVDA","AAPL","MSFT","META","GOOGL","GOOG","AMZN","TSLA","AVGO","NFLX","AMD"];
   const LARGE = [
     "JPM","GS","BAC","MS","WFC","C","BLK","SCHW","AXP","CB","MMC","PGR","MET","PRU","TRV","BK","STT",
@@ -256,17 +316,25 @@ app.post("/api/analyze", async function(req, res) {
 
     if (topic === "econ") {
       prompt = ECON_PROMPT;
-      if (latestMakeData.econ) {
+      if (latestMakeData.econ && latestMakeData.econ.length > 100) {
         rawData = latestMakeData.econ;
         console.log("Econ: using Make.com data");
       } else {
-        const today2 = new Date();
-        const todayStr2 = today2.toISOString().slice(0, 10);
-        const dayName2 = today2.toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
-        rawData = "NO EXTERNAL DATA";
-        prompt = ECON_PROMPT + " TODAY IS " + dayName2 + " (" + todayStr2 + "). Search the web for USD economic reports released or scheduled for " + todayStr2 + ". Find actual values for: Initial Jobless Claims, Continuing Claims, Natural Gas Storage, Crude Oil Inventories, and any other USD high/medium impact reports today. For each report state: name, actual, estimate, beat/miss. Only include " + todayStr2 + " data.";
-        useSearch = true;
-        console.log("Econ: using web search fallback");
+        // Try FMP economic calendar first
+        const fmpEcon = await fetchEconFMP();
+        if (fmpEcon) {
+          rawData = fmpEcon;
+          console.log("Econ: using FMP data");
+        } else {
+          // Fall back to web search
+          const today2 = new Date();
+          const todayStr2 = today2.toISOString().slice(0, 10);
+          const dayName2 = today2.toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
+          rawData = "NO EXTERNAL DATA";
+          prompt = ECON_PROMPT + " TODAY IS " + dayName2 + " (" + todayStr2 + "). Search the web for USD economic reports released or scheduled for " + todayStr2 + ". Find actual values for: Initial Jobless Claims, Continuing Claims, Natural Gas Storage, Crude Oil Inventories, and any other USD high/medium impact reports today. For each report state: name, actual, estimate, beat/miss. Only include " + todayStr2 + " data.";
+          useSearch = true;
+          console.log("Econ: using web search fallback");
+        }
       }
     } else if (topic === "earn") {
       prompt = EARN_PROMPT;
