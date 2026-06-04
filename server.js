@@ -86,48 +86,46 @@ async function fetchEarnings() {
   yesterday.setDate(yesterday.getDate() - 1);
   const todayStr = today.toISOString().slice(0, 10);
   const yestStr = yesterday.toISOString().slice(0, 10);
-  const FMP_KEY = process.env.FMP_API_KEY || "WQMcZiIIJ1rarvN3puluUNQoGXFdvkjg";
+  const FINNHUB_KEY = process.env.FINNHUB_API_KEY || "d8gh1phr01qlgcujfjfgd8gh1phr01qlgcujfjg0";
 
-  async function fetchFMP(dateStr) {
+  async function fetchFinnhub(from, to) {
     try {
       const raw = await fetchUrl(
-        "https://financialmodelingprep.com/api/v3/earning_calendar?from=" + dateStr + "&to=" + dateStr + "&apikey=" + FMP_KEY
+        "https://finnhub.io/api/v1/calendar/earnings?from=" + from + "&to=" + to + "&token=" + FINNHUB_KEY
       );
       const json = JSON.parse(raw);
-      if (!Array.isArray(json) || json.length === 0) return [];
-      return json;
+      return (json && json.earningsCalendar) ? json.earningsCalendar : [];
     } catch(e) {
-      console.log("FMP error for " + dateStr + ": " + e.message);
+      console.log("Finnhub error:", e.message);
       return [];
     }
   }
 
-  const [todayRows, yestRows] = await Promise.all([fetchFMP(todayStr), fetchFMP(yestStr)]);
+  const [todayRows, yestRows] = await Promise.all([
+    fetchFinnhub(todayStr, todayStr),
+    fetchFinnhub(yestStr, yestStr)
+  ]);
 
-  // Index heavyweights to highlight
-  const MEGA = ["NVDA","AAPL","MSFT","META","GOOGL","GOOG","AMZN","TSLA","AVGO","NFLX","AMD","BROADCOM"];
+  const MEGA = ["NVDA","AAPL","MSFT","META","GOOGL","GOOG","AMZN","TSLA","AVGO","NFLX","AMD"];
   const LARGE = ["JPM","GS","BAC","MS","V","MA","UNH","LLY","CRM","ORCL","ADBE","QCOM","MU","NOW","INTC","XOM","CVX"];
 
   function formatRow(r, tag) {
     const isMega = MEGA.includes(r.symbol);
     const isLarge = LARGE.includes(r.symbol);
     const tier = isMega ? "[MEGA-CAP]" : isLarge ? "[LARGE-CAP]" : "[MID/SMALL]";
-    const epsAct = r.eps !== null && r.eps !== undefined ? parseFloat(r.eps).toFixed(2) : "TBD";
-    const epsEst = r.epsEstimated !== null && r.epsEstimated !== undefined ? parseFloat(r.epsEstimated).toFixed(2) : "N/A";
+    const epsAct = (r.epsActual !== null && r.epsActual !== undefined) ? parseFloat(r.epsActual).toFixed(2) : "TBD";
+    const epsEst = (r.epsEstimate !== null && r.epsEstimate !== undefined) ? parseFloat(r.epsEstimate).toFixed(2) : "N/A";
     let beat = "";
     if (epsAct !== "TBD" && epsEst !== "N/A") {
       beat = parseFloat(epsAct) > parseFloat(epsEst) ? "BEAT" : parseFloat(epsAct) < parseFloat(epsEst) ? "MISS" : "IN-LINE";
     }
-    const rev = r.revenue ? " | Rev: $" + (r.revenue/1e9).toFixed(2) + "B" : "";
-    const revEst = r.revenueEstimated ? " vs Est: $" + (r.revenueEstimated/1e9).toFixed(2) + "B" : "";
-    return tag + " " + tier + " " + r.symbol + " | EPS Act: " + epsAct + " vs Est: " + epsEst + " " + beat + rev + revEst + " | " + (r.time || "");
+    const rev = r.revenueActual ? " | Rev: $" + (r.revenueActual/1e9).toFixed(2) + "B" : "";
+    const revEst = r.revenueEstimate ? " vs Est: $" + (r.revenueEstimate/1e9).toFixed(2) + "B" : "";
+    return tag + " " + tier + " " + r.symbol + " | EPS Act: " + epsAct + " vs Est: " + epsEst + " " + beat + rev + revEst + " | " + (r.hour || "");
   }
 
-  // Yesterday AMC
-  const yestAMC = yestRows.filter(r => r.time && r.time.toLowerCase().includes("amc"));
-  // Today BMO
-  const todayBMO = todayRows.filter(r => r.time && r.time.toLowerCase().includes("bmo"));
-  // All today
+  const yestAMC = yestRows.filter(r => r.hour && (r.hour.toLowerCase().includes("amc") || r.hour.toLowerCase().includes("after")));
+  const todayBMO = todayRows.filter(r => r.hour && (r.hour.toLowerCase().includes("bmo") || r.hour.toLowerCase().includes("before")));
   const todayAll = todayRows;
 
   const seen = new Set();
@@ -137,9 +135,8 @@ async function fetchEarnings() {
     return true;
   });
 
-  if (combined.length === 0) return "No earnings data from FMP for " + yestStr + " or " + todayStr + ".";
+  if (combined.length === 0) return "No earnings data from Finnhub for " + yestStr + " or " + todayStr + ".";
 
-  // Sort: mega-caps first, then large-caps, then rest
   combined.sort((a, b) => {
     const aScore = MEGA.includes(a.symbol) ? 0 : LARGE.includes(a.symbol) ? 1 : 2;
     const bScore = MEGA.includes(b.symbol) ? 0 : LARGE.includes(b.symbol) ? 1 : 2;
@@ -155,6 +152,7 @@ async function fetchEarnings() {
 
   return "EARNINGS (yesterday=" + yestStr + " AMC, today=" + todayStr + "):\n" + lines.join("\n");
 }
+
 
 async function fetchPremarket() {
   const html = await fetchUrl("https://www.cnbc.com/world/?region=world");
