@@ -59,16 +59,41 @@ async function fetchEcon() {
 }
 
 async function fetchEarnings() {
-  const today = new Date().toISOString().slice(0, 10);
-  const raw = await fetchUrl("https://api.nasdaq.com/api/calendar/earnings?date=" + today, {
-    "Origin": "https://www.nasdaq.com", "Referer": "https://www.nasdaq.com/"
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const todayStr = today.toISOString().slice(0, 10);
+  const yestStr = yesterday.toISOString().slice(0, 10);
+
+  async function fetchDay(dateStr) {
+    try {
+      const raw = await fetchUrl("https://api.nasdaq.com/api/calendar/earnings?date=" + dateStr, {
+        "Origin": "https://www.nasdaq.com", "Referer": "https://www.nasdaq.com/"
+      });
+      const json = JSON.parse(raw);
+      return (json && json.data && json.data.rows) ? json.data.rows : [];
+    } catch(e) { return []; }
+  }
+
+  const [todayRows, yestRows] = await Promise.all([fetchDay(todayStr), fetchDay(yestStr)]);
+  const yestAMC = yestRows.filter(r => r.time && r.time.toLowerCase().includes("after"));
+  const todayBMO = todayRows.filter(r => r.time && r.time.toLowerCase().includes("before"));
+  const todayOther = todayRows.filter(r => !r.time || !r.time.toLowerCase().includes("before"));
+  const combined = [...yestAMC, ...todayBMO, ...todayOther];
+  const seen = new Set();
+  const unique = combined.filter(r => { if(seen.has(r.symbol)) return false; seen.add(r.symbol); return true; });
+  if (unique.length === 0) return "No earnings data available for " + todayStr;
+  const lines = unique.slice(0, 30).map(function(r) {
+    const isYestAMC = yestAMC.some(y => y.symbol === r.symbol);
+    const isTodayBMO = todayBMO.some(b => b.symbol === r.symbol);
+    const tag = isYestAMC ? "[YEST AMC]" : isTodayBMO ? "[TODAY BMO]" : "[TODAY]";
+    var beat = "";
+    if (r.eps && r.epsForecast) {
+      beat = parseFloat(r.eps) > parseFloat(r.epsForecast) ? "BEAT" : parseFloat(r.eps) < parseFloat(r.epsForecast) ? "MISS" : "IN-LINE";
+    }
+    return tag + " " + r.symbol + " | Est: " + (r.epsForecast || "N/A") + " | Act: " + (r.eps || "TBD") + " " + beat + " | " + (r.time || "");
   });
-  try {
-    const json = JSON.parse(raw);
-    const rows = (json && json.data && json.data.rows) ? json.data.rows : [];
-    if (rows.length === 0) return "No earnings reported today.";
-    return rows.slice(0, 25).map(r => r.symbol + " | Est: " + r.epsForecast + " | Act: " + (r.eps || "TBD") + " | " + r.time).join("\n");
-  } catch(e) { return stripHtml(raw, 2500); }
+  return "EARNINGS (" + yestStr + " AMC + " + todayStr + "):\n" + lines.join("\n");
 }
 
 async function fetchPremarket() {
