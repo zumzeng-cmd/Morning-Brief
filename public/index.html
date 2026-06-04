@@ -1,476 +1,353 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Morning Brief — Futures Bias Engine</title>
-<style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Bebas+Neue&display=swap');
-*{box-sizing:border-box;margin:0;padding:0;}
-:root{
-  --bg:#080C0F;--surface:#0E1318;--surface2:#141B22;--border:#1E2830;
-  --accent:#00FF94;--accent2:#FFB800;--bear:#FF4444;--bull:#00FF94;
-  --text:#E2E8F0;--muted:#4A6070;
-  --font-display:'Bebas Neue',sans-serif;--font-mono:'DM Mono',monospace;
+const express = require("express");
+const cors = require("cors");
+const path = require("path");
+const https = require("https");
+const fs = require("fs");
+const app = express();
+
+app.use(cors({ origin: "*" }));
+app.use(express.json());
+app.use(express.static(path.join(__dirname, "public")));
+
+// ── History ───────────────────────────────────────────────────
+const HISTORY_FILE = path.join(__dirname, "history.json");
+function loadHistory() {
+  try { if (fs.existsSync(HISTORY_FILE)) return JSON.parse(fs.readFileSync(HISTORY_FILE, "utf8")); }
+  catch(e) { console.error("History load error:", e.message); }
+  return {};
 }
-body{background:var(--bg);color:var(--text);font-family:var(--font-mono);min-height:100vh;}
-body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);background-size:40px 40px;opacity:0.3;pointer-events:none;z-index:0;}
-.wrap{position:relative;z-index:1;padding:1.5rem;max-width:1100px;margin:0 auto;}
-.hdr{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:1.2rem;border-bottom:1px solid var(--border);padding-bottom:1rem;}
-.hdr-title{font-family:var(--font-display);font-size:42px;letter-spacing:2px;color:var(--accent);line-height:1;}
-.hdr-sub{font-size:11px;color:var(--muted);margin-top:4px;letter-spacing:0.1em;}
-.clock{font-family:var(--font-display);font-size:32px;color:var(--text);letter-spacing:2px;}
-.date-txt{font-size:11px;color:var(--muted);letter-spacing:0.08em;text-align:right;}
-
-/* date nav */
-.date-nav{display:flex;align-items:center;gap:10px;margin-bottom:1.2rem;flex-wrap:wrap;}
-.date-nav input[type=date]{background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:13px;padding:6px 10px;border-radius:4px;outline:none;}
-.date-nav input[type=date]::-webkit-calendar-picker-indicator{filter:invert(1);opacity:0.5;}
-.dnbtn{padding:6px 14px;border:1px solid var(--border);background:transparent;color:var(--muted);font-family:var(--font-mono);font-size:12px;border-radius:4px;cursor:pointer;transition:all 0.2s;}
-.dnbtn:hover{border-color:var(--accent);color:var(--accent);}
-.dnbtn.active{border-color:var(--accent);color:var(--accent);background:rgba(0,255,148,0.07);}
-.mode-badge{font-size:11px;padding:3px 10px;border-radius:2px;letter-spacing:0.08em;}
-.mode-live{background:rgba(0,255,148,0.12);color:var(--bull);}
-.mode-hist{background:rgba(255,184,0,0.12);color:var(--accent2);}
-
-/* banner */
-.bias-banner{border:1px solid var(--border);border-radius:4px;padding:1rem 1.5rem;margin-bottom:1.2rem;display:flex;align-items:center;justify-content:space-between;gap:1rem;}
-.bias-label{font-size:11px;color:var(--muted);letter-spacing:0.12em;text-transform:uppercase;}
-.bias-value{font-family:var(--font-display);font-size:36px;letter-spacing:3px;transition:color 0.5s;}
-.score-bar-wrap{flex:1;height:6px;background:var(--surface2);border-radius:3px;overflow:hidden;}
-.score-bar{height:6px;border-radius:3px;transition:width 0.6s,background 0.6s;width:50%;background:var(--border);}
-.agg-num{font-family:var(--font-display);font-size:28px;}
-
-/* cards */
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem;}
-@media(max-width:640px){.grid{grid-template-columns:1fr;}}
-.card{background:var(--surface);border:1px solid var(--border);border-radius:4px;overflow:hidden;transition:border-color 0.3s;}
-.card.bull{border-color:rgba(0,255,148,0.3);}.card.bear{border-color:rgba(255,68,68,0.3);}
-.card-hdr{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--surface2);}
-.card-title{font-size:11px;letter-spacing:0.1em;color:var(--muted);text-transform:uppercase;}
-.card-sig{font-size:11px;font-weight:500;padding:2px 10px;border-radius:2px;letter-spacing:0.08em;}
-.sig-bull{background:rgba(0,255,148,0.12);color:var(--bull);}
-.sig-bear{background:rgba(255,68,68,0.12);color:#FF4444;}
-.sig-neu{background:rgba(74,86,104,0.2);color:var(--muted);}
-.card-body{padding:12px 14px;min-height:80px;font-size:12px;line-height:1.7;color:#8FA8B8;}
-.card-body.idle{color:var(--muted);font-style:italic;}
-.card-body.loading{display:flex;align-items:center;gap:8px;color:var(--muted);}
-.spinner{width:12px;height:12px;border:1.5px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0;}
-@keyframes spin{to{transform:rotate(360deg);}}
-.card-footer{padding:6px 14px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
-.card-pts{font-family:var(--font-display);font-size:20px;}
-.pts-bull{color:var(--bull);}.pts-bear{color:#FF4444;}.pts-neu{color:var(--muted);}
-.card-weight{font-size:10px;color:var(--muted);}
-
-/* overrides */
-.override-row{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:1rem;}
-@media(max-width:640px){.override-row{grid-template-columns:1fr 1fr;}}
-.override-card{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:10px 12px;}
-.override-label{font-size:10px;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:6px;}
-.override-btns{display:flex;gap:4px;}
-.obtn{flex:1;padding:4px 0;border:1px solid var(--border);background:transparent;color:var(--muted);font-family:var(--font-mono);font-size:10px;border-radius:2px;cursor:pointer;transition:all 0.2s;}
-.obtn:hover{border-color:var(--accent);color:var(--accent);}
-.obtn.active-bull{background:rgba(0,255,148,0.1);border-color:var(--bull);color:var(--bull);}
-.obtn.active-bear{background:rgba(255,68,68,0.1);border-color:#FF4444;color:#FF4444;}
-.obtn.active-neu{background:rgba(74,86,104,0.15);border-color:#4A5568;color:var(--text);}
-.obtn:disabled{opacity:0.3;cursor:not-allowed;}
-
-/* buttons */
-.run-btn{width:100%;padding:14px;background:transparent;border:1px solid var(--accent);color:var(--accent);font-family:var(--font-display);font-size:22px;letter-spacing:3px;border-radius:4px;cursor:pointer;transition:all 0.2s;margin-bottom:0.75rem;}
-.run-btn:hover:not(:disabled){background:rgba(0,255,148,0.08);}
-.run-btn:disabled{border-color:var(--border);color:var(--muted);cursor:not-allowed;}
-.footer-note{font-size:10px;color:var(--muted);text-align:center;letter-spacing:0.06em;margin-bottom:1.5rem;}
-
-/* history panel */
-.history-section{margin-top:1.5rem;border-top:1px solid var(--border);padding-top:1.2rem;}
-.history-title{font-family:var(--font-display);font-size:22px;letter-spacing:2px;color:var(--muted);margin-bottom:1rem;}
-.history-list{display:flex;flex-direction:column;gap:6px;}
-.history-item{display:flex;align-items:center;gap:12px;padding:8px 12px;border:1px solid var(--border);border-radius:4px;background:var(--surface);cursor:pointer;transition:all 0.2s;}
-.history-item:hover{border-color:var(--accent);background:var(--surface2);}
-.history-item.selected{border-color:var(--accent2);background:rgba(255,184,0,0.05);}
-.hist-date{font-size:12px;color:var(--text);min-width:110px;}
-.hist-bias{font-family:var(--font-display);font-size:14px;letter-spacing:1px;flex:1;}
-.hist-score{font-family:var(--font-display);font-size:16px;min-width:50px;text-align:right;}
-.no-history{font-size:12px;color:var(--muted);font-style:italic;padding:1rem 0;}
-</style>
-</head>
-<body>
-<div class="wrap">
-  <div class="hdr">
-    <div>
-      <div class="hdr-title">MORNING BRIEF</div>
-      <div class="hdr-sub">FUTURES TRADER · DAILY BIAS ENGINE</div>
-    </div>
-    <div>
-      <div class="clock" id="clock">--:--</div>
-      <div class="date-txt" id="dateTxt">-- --- ----</div>
-    </div>
-  </div>
-
-  <!-- date nav -->
-  <div class="date-nav">
-    <button class="dnbtn active" id="btnToday" onclick="switchToToday()">TODAY</button>
-    <button class="dnbtn" id="btnHist" onclick="switchToHistory()">HISTORY</button>
-    <input type="date" id="datePicker" style="display:none;" onchange="loadDate(this.value)"/>
-    <span class="mode-badge mode-live" id="modeBadge">LIVE</span>
-  </div>
-
-  <!-- bias banner -->
-  <div class="bias-banner">
-    <div>
-      <div class="bias-label">Today's bias</div>
-      <div class="bias-value" id="biasValue" style="color:var(--muted);">AWAITING ANALYSIS</div>
-    </div>
-    <div class="score-bar-wrap"><div class="score-bar" id="scoreBar"></div></div>
-    <div style="text-align:right;">
-      <div class="bias-label">Aggregate</div>
-      <div class="agg-num" id="aggScore" style="color:var(--muted);">—</div>
-    </div>
-  </div>
-
-  <!-- cards -->
-  <div class="grid">
-    <div class="card" id="card-econ">
-      <div class="card-hdr"><span class="card-title">📅 Econ Calendar</span><span class="card-sig sig-neu" id="sig-econ">NEUTRAL</span></div>
-      <div class="card-body idle" id="body-econ">Run analysis to fetch today's reports...</div>
-      <div class="card-footer"><span class="card-pts pts-neu" id="pts-econ">0.0</span><span class="card-weight">Weight: 3×</span></div>
-    </div>
-    <div class="card" id="card-earn">
-      <div class="card-hdr"><span class="card-title">📊 Earnings</span><span class="card-sig sig-neu" id="sig-earn">NEUTRAL</span></div>
-      <div class="card-body idle" id="body-earn">Run analysis to check earnings...</div>
-      <div class="card-footer"><span class="card-pts pts-neu" id="pts-earn">0.0</span><span class="card-weight">Weight: 2×</span></div>
-    </div>
-    <div class="card" id="card-premarket">
-      <div class="card-hdr"><span class="card-title">🌏 Pre-Market</span><span class="card-sig sig-neu" id="sig-premarket">NEUTRAL</span></div>
-      <div class="card-body idle" id="body-premarket">Run analysis to check overnight markets...</div>
-      <div class="card-footer"><span class="card-pts pts-neu" id="pts-premarket">0.0</span><span class="card-weight">Weight: 2×</span></div>
-    </div>
-    <div class="card" id="card-news">
-      <div class="card-hdr"><span class="card-title">📰 Market News</span><span class="card-sig sig-neu" id="sig-news">NEUTRAL</span></div>
-      <div class="card-body idle" id="body-news">Run analysis to scan headlines...</div>
-      <div class="card-footer"><span class="card-pts pts-neu" id="pts-news">0.0</span><span class="card-weight">Weight: 2×</span></div>
-    </div>
-  </div>
-
-  <!-- overrides -->
-  <div class="override-row" id="overrideRow">
-    <div class="override-card"><div class="override-label">Override: Econ</div><div class="override-btns">
-      <button class="obtn" onclick="setOverride('econ','bull',this)">BULL</button>
-      <button class="obtn" onclick="setOverride('econ','neu',this)">NEU</button>
-      <button class="obtn" onclick="setOverride('econ','bear',this)">BEAR</button>
-      <button class="obtn" onclick="clearOverride('econ',this)">AI</button>
-    </div></div>
-    <div class="override-card"><div class="override-label">Override: Earnings</div><div class="override-btns">
-      <button class="obtn" onclick="setOverride('earn','bull',this)">BULL</button>
-      <button class="obtn" onclick="setOverride('earn','neu',this)">NEU</button>
-      <button class="obtn" onclick="setOverride('earn','bear',this)">BEAR</button>
-      <button class="obtn" onclick="clearOverride('earn',this)">AI</button>
-    </div></div>
-    <div class="override-card"><div class="override-label">Override: Pre-Market</div><div class="override-btns">
-      <button class="obtn" onclick="setOverride('premarket','bull',this)">BULL</button>
-      <button class="obtn" onclick="setOverride('premarket','neu',this)">NEU</button>
-      <button class="obtn" onclick="setOverride('premarket','bear',this)">BEAR</button>
-      <button class="obtn" onclick="clearOverride('premarket',this)">AI</button>
-    </div></div>
-    <div class="override-card"><div class="override-label">Override: News</div><div class="override-btns">
-      <button class="obtn" onclick="setOverride('news','bull',this)">BULL</button>
-      <button class="obtn" onclick="setOverride('news','neu',this)">NEU</button>
-      <button class="obtn" onclick="setOverride('news','bear',this)">BEAR</button>
-      <button class="obtn" onclick="clearOverride('news',this)">AI</button>
-    </div></div>
-  </div>
-
-  <button class="run-btn" id="runBtn" onclick="runAll()">▶ RUN MORNING ANALYSIS</button>
-  <div class="footer-note" id="footerNote">Powered by Claude AI · Live data from ForexFactory, Nasdaq & CNBC</div>
-
-  <!-- history -->
-  <div class="history-section">
-    <div class="history-title">HISTORY LOG</div>
-    <div class="history-list" id="historyList"><div class="no-history">No history yet — run your first analysis to start building the log.</div></div>
-  </div>
-</div>
-
-<script>
-const WEIGHTS={econ:3,earn:2,premarket:2,news:2};
-const MAX=Object.values(WEIGHTS).reduce((a,b)=>a+b,0);
-let scores={econ:0,earn:0,premarket:0,news:0};
-let overrides={econ:null,earn:null,premarket:null,news:null};
-let running=false;
-let historyMode=false;
-let allHistory={};
-
-// clock
-function updateClock(){
-  const now=new Date();
-  document.getElementById('clock').textContent=now.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
-  document.getElementById('dateTxt').textContent=now.toLocaleDateString('en-US',{weekday:'short',day:'2-digit',month:'short',year:'numeric'}).toUpperCase();
-}
-updateClock();setInterval(updateClock,1000);
-
-function todayKey(){
-  return new Date().toISOString().slice(0,10);
+function saveHistory(h) {
+  try { fs.writeFileSync(HISTORY_FILE, JSON.stringify(h, null, 2)); }
+  catch(e) { console.error("History save error:", e.message); }
 }
 
-// mode switching
-function switchToToday(){
-  historyMode=false;
-  document.getElementById('btnToday').classList.add('active');
-  document.getElementById('btnHist').classList.remove('active');
-  document.getElementById('datePicker').style.display='none';
-  document.getElementById('modeBadge').textContent='LIVE';
-  document.getElementById('modeBadge').className='mode-badge mode-live';
-  document.getElementById('runBtn').style.display='';
-  document.getElementById('overrideRow').style.opacity='1';
-  document.getElementById('overrideRow').style.pointerEvents='';
-  resetCards();
-}
-
-function switchToHistory(){
-  historyMode=true;
-  document.getElementById('btnToday').classList.remove('active');
-  document.getElementById('btnHist').classList.add('active');
-  document.getElementById('datePicker').style.display='';
-  document.getElementById('modeBadge').textContent='HISTORY';
-  document.getElementById('modeBadge').className='mode-badge mode-hist';
-  document.getElementById('runBtn').style.display='none';
-  document.getElementById('overrideRow').style.opacity='0.3';
-  document.getElementById('overrideRow').style.pointerEvents='none';
-  // set date picker to today
-  document.getElementById('datePicker').value=todayKey();
-}
-
-function loadDate(dateKey){
-  const entry=allHistory[dateKey];
-  if(!entry){
-    resetCards();
-    document.getElementById('biasValue').textContent='NO DATA';
-    document.getElementById('biasValue').style.color='var(--muted)';
-    document.getElementById('footerNote').textContent='No analysis saved for '+dateKey;
-    return;
-  }
-  renderSnapshot(entry);
-  document.getElementById('footerNote').textContent='Viewing saved analysis for '+dateKey;
-  // highlight in history list
-  document.querySelectorAll('.history-item').forEach(el=>{
-    el.classList.toggle('selected', el.dataset.key===dateKey);
-  });
-}
-
-function resetCards(){
-  ['econ','earn','premarket','news'].forEach(k=>{
-    scores[k]=0;
-    document.getElementById('sig-'+k).textContent='NEUTRAL';
-    document.getElementById('sig-'+k).className='card-sig sig-neu';
-    document.getElementById('body-'+k).textContent='Run analysis to fetch data...';
-    document.getElementById('body-'+k).className='card-body idle';
-    document.getElementById('pts-'+k).textContent='0.0';
-    document.getElementById('pts-'+k).className='card-pts pts-neu';
-    document.getElementById('card-'+k).className='card';
-  });
-  document.getElementById('biasValue').textContent='AWAITING ANALYSIS';
-  document.getElementById('biasValue').style.color='var(--muted)';
-  document.getElementById('aggScore').textContent='—';
-  document.getElementById('scoreBar').style.width='50%';
-  document.getElementById('scoreBar').style.background='var(--border)';
-}
-
-// overrides
-function setOverride(key,val,btn){
-  overrides[key]=val;
-  btn.parentElement.querySelectorAll('.obtn').forEach(b=>b.className='obtn');
-  btn.className='obtn active-'+(val==='bull'?'bull':val==='bear'?'bear':'neu');
-  scores[key]=val==='bull'?1:val==='bear'?-1:0;
-  updateBias();
-}
-function clearOverride(key,btn){
-  overrides[key]=null;
-  btn.parentElement.querySelectorAll('.obtn').forEach(b=>b.className='obtn');
-  updateBias();
-}
-
-function setCardLoading(key){
-  document.getElementById('body-'+key).innerHTML='<div class="spinner"></div> Fetching live data...';
-  document.getElementById('body-'+key).className='card-body loading';
-}
-
-function setCardResult(key,result){
-  const sig=result.signal==='bull'?'BULLISH':result.signal==='bear'?'BEARISH':'NEUTRAL';
-  const sigClass=result.signal==='bull'?'sig-bull':result.signal==='bear'?'sig-bear':'sig-neu';
-
-  // Detect market shock override in news card
-  const isShockNews = key==='news' && result.summary && (result.summary.includes('MARKET_SHOCK_OVERRIDE') || result.summary.includes('GEOPOLITICAL_OVERRIDE'));
-  const cleanSummary = result.summary ? result.summary.replace('MARKET_SHOCK_OVERRIDE','').replace('GEOPOLITICAL_OVERRIDE','').trim() : '';
-
-  if(isShockNews){
-    // Store the override state globally
-    window.marketShockActive = true;
-
-    // Discount all other card scores by 50%
-    ['econ','earn','premarket'].forEach(function(k){
-      scores[k] = scores[k] * 0.5;
+// ── HTTP fetch ────────────────────────────────────────────────
+function fetchUrl(url, extraHeaders) {
+  return new Promise((resolve, reject) => {
+    const mod = url.startsWith("https") ? require("https") : require("http");
+    const headers = Object.assign({
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+      "Accept": "text/html,application/json,*/*",
+      "Accept-Language": "en-US,en;q=0.9"
+    }, extraHeaders || {});
+    const req = mod.get(url, { headers }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location)
+        return fetchUrl(res.headers.location, extraHeaders).then(resolve).catch(reject);
+      let data = "";
+      res.on("data", c => data += c);
+      res.on("end", () => resolve(data));
     });
-
-    // Add warning banner to econ card
-    const econBody = document.getElementById('body-econ');
-    if(econBody && !econBody.dataset.shockWarning){
-      econBody.dataset.shockWarning = '1';
-      econBody.innerHTML = '<div style="color:#FFB800;font-size:11px;margin-bottom:6px;border-left:2px solid #FFB800;padding-left:6px;">⚠️ MARKET SHOCK OVERRIDE — discounted 50%</div>' + econBody.textContent;
-    }
-
-    // Add warning banner to earnings card
-    const earnBody = document.getElementById('body-earn');
-    if(earnBody && !earnBody.dataset.shockWarning){
-      earnBody.dataset.shockWarning = '1';
-      earnBody.innerHTML = '<div style="color:#FFB800;font-size:11px;margin-bottom:6px;border-left:2px solid #FFB800;padding-left:6px;">⚠️ MARKET SHOCK OVERRIDE — discounted 50%</div>' + earnBody.textContent;
-    }
-
-    // Add warning banner to premarket card
-    const preMktBody = document.getElementById('body-premarket');
-    if(preMktBody && !preMktBody.dataset.shockWarning){
-      preMktBody.dataset.shockWarning = '1';
-      preMktBody.innerHTML = '<div style="color:#FFB800;font-size:11px;margin-bottom:6px;border-left:2px solid #FFB800;padding-left:6px;">⚠️ MARKET SHOCK OVERRIDE — discounted 50%</div>' + preMktBody.textContent;
-    }
-
-    // Update sig badges on all other cards
-    ['econ','earn','premarket'].forEach(function(k){
-      const sigEl = document.getElementById('sig-'+k);
-      if(sigEl){ sigEl.textContent = '⚠️ OVERRIDDEN'; sigEl.className = 'card-sig'; sigEl.style.color='#FFB800'; sigEl.style.background='rgba(255,184,0,0.1)'; }
-    });
-  }
-
-  const pts = result.score * WEIGHTS[key];
-  const ptsClass=pts>0?'pts-bull':pts<0?'pts-bear':'pts-neu';
-  document.getElementById('sig-'+key).textContent = isShockNews ? '⚠️ SHOCK TRIGGER' : sig;
-  document.getElementById('sig-'+key).className='card-sig '+(isShockNews?'sig-bear':sigClass);
-  if(isShockNews){ document.getElementById('sig-'+key).style.background='rgba(255,68,68,0.2)'; document.getElementById('sig-'+key).style.color='#FF4444'; }
-  document.getElementById('body-'+key).textContent = isShockNews ? cleanSummary : (result.summary||'');
-  document.getElementById('body-'+key).className='card-body';
-  document.getElementById('pts-'+key).textContent=(pts>=0?'+':'')+pts.toFixed(1);
-  document.getElementById('pts-'+key).className='card-pts '+ptsClass;
-  document.getElementById('card-'+key).className='card '+(result.signal==='bull'?'bull':result.signal==='bear'?'bear':'');
-  if(!overrides[key]) scores[key]=result.score;
-  updateBias();
-}
-
-function setCardError(key){
-  document.getElementById('body-'+key).textContent='Could not fetch data. Use override buttons to set manually.';
-  document.getElementById('body-'+key).className='card-body idle';
-}
-
-function updateBias(){
-  const raw=Object.keys(scores).reduce((sum,k)=>{
-    const s=overrides[k]!=null?(overrides[k]==='bull'?1:overrides[k]==='bear'?-1:0):scores[k];
-    return sum+s*WEIGHTS[k];
-  },0);
-  const norm=Math.max(-10,Math.min(10,(raw/MAX)*10));
-  const pct=((norm+10)/20*100).toFixed(1);
-  let label,color;
-  if(norm>=6){label='STRONGLY BULLISH';color='var(--bull)';}
-  else if(norm>=2){label='MILDLY BULLISH';color='#7AE89A';}
-  else if(norm<=-6){label='STRONGLY BEARISH';color='var(--bear)';}
-  else if(norm<=-2){label='MILDLY BEARISH';color='#E87A7A';}
-  else{label='MIXED / NEUTRAL';color='var(--accent2)';}
-  document.getElementById('biasValue').textContent=label;
-  document.getElementById('biasValue').style.color=color;
-  document.getElementById('aggScore').textContent=(norm>=0?'+':'')+norm.toFixed(1);
-  document.getElementById('aggScore').style.color=color;
-  document.getElementById('scoreBar').style.width=pct+'%';
-  document.getElementById('scoreBar').style.background=color;
-  return {norm, label, color};
-}
-
-function renderSnapshot(entry){
-  ['econ','earn','premarket','news'].forEach(k=>{
-    if(entry[k]){
-      scores[k]=entry[k].score||0;
-      setCardResult(k,entry[k]);
-    }
+    req.on("error", reject);
+    req.setTimeout(10000, () => { req.destroy(); reject(new Error("Timeout")); });
   });
 }
 
-async function analyze(topic){
-  const res=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topic})});
-  if(!res.ok) throw new Error('Server error '+res.status);
-  return res.json();
+function stripHtml(html, maxLen) {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ").trim()
+    .slice(0, maxLen || 2500);
 }
 
-async function saveSnapshot(results){
-  const dateKey=todayKey();
-  const bias=updateBias();
-  const snapshot={
-    date:dateKey,
-    timestamp:new Date().toISOString(),
-    bias:bias.label,
-    norm:bias.norm,
-    econ:results.econ||null,
-    earn:results.earn||null,
-    premarket:results.premarket||null,
-    news:results.news||null
-  };
-  try{
-    await fetch('/api/history/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dateKey,snapshot})});
-    allHistory[dateKey]=snapshot;
-    renderHistoryList();
-    console.log('Saved snapshot for',dateKey);
-  }catch(e){console.error('Save error:',e);}
-}
-
-async function runAll(){
-  if(running)return;
-  running=true;
-  const btn=document.getElementById('runBtn');
-  btn.disabled=true;btn.textContent='⟳ ANALYZING...';
-  document.getElementById('footerNote').textContent='Fetching live data from ForexFactory, Nasdaq & CNBC...';
-  const keys=['econ','earn','premarket','news'];
-  keys.forEach(k=>setCardLoading(k));
-  const results={};
-  for(const key of keys){
-    try{
-      const result=await analyze(key);
-      setCardResult(key,result);
-      results[key]=result;
-    }catch(e){
-      console.error(key,e);
-      setCardError(key);
+// ── Data fetchers ─────────────────────────────────────────────
+async function fetchEcon() {
+  // Try ForexFactory first, fall back to investing.com economic calendar
+  try {
+    const html = await fetchUrl("https://www.forexfactory.com/calendar");
+    const text = stripHtml(html, 4500);
+    // If we got blocked or got a login page, text will be short or missing calendar data
+    if (text.length > 500 && (text.includes("USD") || text.includes("GMT") || text.includes("forecast"))) {
+      return text;
     }
-    await new Promise(r=>setTimeout(r,1500));
+    throw new Error("ForexFactory returned insufficient data");
+  } catch(e) {
+    console.log("ForexFactory failed (" + e.message + "), trying Tradingeconomics...");
+    try {
+      const html2 = await fetchUrl("https://tradingeconomics.com/calendar", {
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+      });
+      const text2 = stripHtml(html2, 4500);
+      if (text2.length > 500) return text2;
+      throw new Error("TradingEconomics also blocked");
+    } catch(e2) {
+      console.log("TradingEconomics failed (" + e2.message + "), trying ISM/BLS direct...");
+      // Last resort: return a message so Claude uses its knowledge
+      return "Economic calendar scraping unavailable. Use your knowledge of today s date to recall any major USD economic reports scheduled or released today including NFP, CPI, JOLTS, ISM, GDP, Fed speeches, jobless claims, PCE, PPI. State what you know and score accordingly.";
+    }
   }
-  await saveSnapshot(results);
-  running=false;
-  btn.disabled=false;btn.textContent='↺ REFRESH ANALYSIS';
-  document.getElementById('footerNote').textContent='Last run: '+new Date().toLocaleTimeString()+' · Auto-saved to history';
 }
 
-// history
-function renderHistoryList(){
-  const keys=Object.keys(allHistory).sort().reverse();
-  const list=document.getElementById('historyList');
-  if(keys.length===0){
-    list.innerHTML='<div class="no-history">No history yet — run your first analysis to start building the log.</div>';
-    return;
+async function fetchEarnings() {
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const todayStr = today.toISOString().slice(0, 10);
+  const yestStr = yesterday.toISOString().slice(0, 10);
+  const FINNHUB_KEY = process.env.FINNHUB_API_KEY || "d8gh1phr01qlgcujfjfgd8gh1phr01qlgcujfjg0";
+
+  async function fetchFinnhub(from, to) {
+    try {
+      const raw = await fetchUrl(
+        "https://finnhub.io/api/v1/calendar/earnings?from=" + from + "&to=" + to + "&token=" + FINNHUB_KEY
+      );
+      const json = JSON.parse(raw);
+      return (json && json.earningsCalendar) ? json.earningsCalendar : [];
+    } catch(e) {
+      console.log("Finnhub error:", e.message);
+      return [];
+    }
   }
-  list.innerHTML=keys.map(k=>{
-    const e=allHistory[k];
-    const norm=e.norm||0;
-    const color=norm>=2?'var(--bull)':norm<=-2?'#FF4444':'var(--accent2)';
-    return '<div class="history-item" data-key="'+k+'" onclick="loadDate(\''+k+'\')">' +
-      '<span class="hist-date">'+k+'</span>' +
-      '<span class="hist-bias" style="color:'+color+'">'+e.bias+'</span>' +
-      '<span class="hist-score" style="color:'+color+'">'+(norm>=0?'+':'')+norm.toFixed(1)+'</span>' +
-    '</div>';
-  }).join('');
+
+  const [todayRows, yestRows] = await Promise.all([
+    fetchFinnhub(todayStr, todayStr),
+    fetchFinnhub(yestStr, yestStr)
+  ]);
+
+  // Mega-caps that single-handedly move NQ/ES
+  const MEGA = ["NVDA","AAPL","MSFT","META","GOOGL","GOOG","AMZN","TSLA","AVGO","NFLX","AMD","BROADCOM"];
+
+  // Large-caps with significant index impact — banks, financials, tech, healthcare, energy, retail, industrials
+  const LARGE = [
+    // Banks & Financials
+    "JPM","GS","BAC","MS","WFC","C","BLK","SCHW","AXP","CB","MMC","PGR","MET","PRU","TRV","BK","STT",
+    // Payments
+    "V","MA","PYPL","SQ",
+    // Tech & Semis
+    "CRM","ORCL","ADBE","QCOM","MU","NOW","INTC","TXN","AMAT","LRCX","KLAC","MRVL","ARM","PANW","SNOW","PLTR",
+    // Healthcare & Pharma
+    "UNH","LLY","JNJ","PFE","ABBV","MRK","BMY","AMGN","GILD","CVS","CI","HUM","ELV","ISRG","MDT","ABT",
+    // Energy
+    "XOM","CVX","COP","SLB","EOG","PSX","VLO","MPC",
+    // Retail & Consumer
+    "WMT","AMZN","HD","COST","TGT","LOW","NKE","SBUX","MCD","YUM",
+    // Industrials & Defense
+    "BA","CAT","GE","HON","MMM","RTX","LMT","NOC","DE","UPS","FDX",
+    // Comm & Media
+    "DIS","CMCSA","T","VZ","NFLX","SNAP","UBER","LYFT",
+    // Autos
+    "F","GM","RIVN",
+    // REITs & Utilities (less impact but included)
+    "AMT","PLD","NEE"
+  ];
+
+  function formatRow(r, tag) {
+    const isMega = MEGA.includes(r.symbol);
+    const isLarge = LARGE.includes(r.symbol);
+    const tier = isMega ? "[MEGA-CAP]" : isLarge ? "[LARGE-CAP]" : "[MID/SMALL]";
+    const epsAct = (r.epsActual !== null && r.epsActual !== undefined) ? parseFloat(r.epsActual).toFixed(2) : "TBD";
+    const epsEst = (r.epsEstimate !== null && r.epsEstimate !== undefined) ? parseFloat(r.epsEstimate).toFixed(2) : "N/A";
+    let beat = "";
+    if (epsAct !== "TBD" && epsEst !== "N/A") {
+      const diff = parseFloat(epsAct) - parseFloat(epsEst);
+      const pct = Math.abs(diff) / Math.abs(parseFloat(epsEst));
+      if (isMega) {
+        // Mega-caps: any miss is a miss, any beat is a beat — no tolerance
+        // $2T+ companies are priced for perfection, even $0.01 matters
+        if (diff > 0) beat = "BEAT";
+        else if (diff < 0) beat = "MISS";
+        else beat = "IN-LINE";
+      } else {
+        // Large/mid caps: 1% tolerance to filter out consensus noise
+        if (pct < 0.01) beat = "IN-LINE";
+        else beat = diff > 0 ? "BEAT" : "MISS";
+      }
+    }
+    const rev = r.revenueActual ? " | Rev: $" + (r.revenueActual/1e9).toFixed(2) + "B" : "";
+    const revEst = r.revenueEstimate ? " vs Est: $" + (r.revenueEstimate/1e9).toFixed(2) + "B" : "";
+    return tag + " " + tier + " " + r.symbol + " | EPS Act: " + epsAct + " vs Est: " + epsEst + " " + beat + rev + revEst + " | " + (r.hour || "");
+  }
+
+  const yestAMC = yestRows.filter(r => r.hour && (r.hour.toLowerCase().includes("amc") || r.hour.toLowerCase().includes("after")));
+  const todayBMO = todayRows.filter(r => r.hour && (r.hour.toLowerCase().includes("bmo") || r.hour.toLowerCase().includes("before")));
+  const todayAll = todayRows;
+
+  const seen = new Set();
+  const combined = [...yestAMC, ...todayBMO, ...todayAll].filter(r => {
+    if (seen.has(r.symbol)) return false;
+    seen.add(r.symbol);
+    return true;
+  });
+
+  if (combined.length === 0) return "No earnings data from Finnhub for " + yestStr + " or " + todayStr + ".";
+
+  combined.sort((a, b) => {
+    const aScore = MEGA.includes(a.symbol) ? 0 : LARGE.includes(a.symbol) ? 1 : 2;
+    const bScore = MEGA.includes(b.symbol) ? 0 : LARGE.includes(b.symbol) ? 1 : 2;
+    return aScore - bScore;
+  });
+
+  const lines = combined.slice(0, 40).map(r => {
+    const isYestAMC = yestAMC.some(y => y.symbol === r.symbol);
+    const isTodayBMO = todayBMO.some(b => b.symbol === r.symbol);
+    const tag = isYestAMC ? "[YEST AMC]" : isTodayBMO ? "[TODAY BMO]" : "[TODAY]";
+    return formatRow(r, tag);
+  });
+
+  return "EARNINGS (yesterday=" + yestStr + " AMC, today=" + todayStr + "):\n" + lines.join("\n");
 }
 
-async function loadHistory(){
-  try{
-    const res=await fetch('/api/history');
-    allHistory=await res.json();
-    renderHistoryList();
-  }catch(e){console.error('History load error:',e);}
+
+async function fetchPremarket() {
+  const html = await fetchUrl("https://www.cnbc.com/world/?region=world");
+  return stripHtml(html, 2500);
 }
 
-// init
-loadHistory();
-</script>
-</body>
-</html>
+async function fetchNews() {
+  const html = await fetchUrl("https://www.cnbc.com/markets/");
+  return stripHtml(html, 2500);
+}
+
+// ── Claude ────────────────────────────────────────────────────
+function callClaude(prompt, data) {
+  return new Promise((resolve, reject) => {
+    const today = new Date().toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
+    const payload = JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 400,
+      system: "You are a futures trader morning briefing assistant. Today is " + today + ". CRITICAL: Reply ONLY with raw JSON, no markdown, no backticks, no explanation. Format: {\"signal\":\"bull\",\"summary\":\"2 sentence summary\",\"score\":1} where signal is bull/bear/neutral and score is 1/-1/0.",
+      messages: [{ role: "user", content: prompt + "\n\nDATA:\n" + data }]
+    });
+    const options = {
+      hostname: "api.anthropic.com", path: "/v1/messages", method: "POST",
+      headers: {
+        "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload),
+        "x-api-key": process.env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01"
+      }
+    };
+    const req = https.request(options, res => {
+      let raw = "";
+      res.on("data", c => raw += c);
+      res.on("end", () => {
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed.error) return reject(new Error(parsed.error.message));
+          const text = (parsed.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
+          resolve(JSON.parse(text.replace(/```json|```/g, "").trim()));
+        } catch(e) { reject(new Error("Parse error: " + e.message)); }
+      });
+    });
+    req.on("error", reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
+// ── Prompts ───────────────────────────────────────────────────
+const ECON_PROMPT = [
+  "From this ForexFactory calendar data, extract ONLY reports that are scheduled for TODAY or were released TODAY. Strictly ignore any reports from yesterday or earlier even if they appear in the data. Today is " + new Date().toLocaleDateString("en-US", {weekday:"long", year:"numeric", month:"long", day:"numeric"}) + ".",
+  "INCLUDE ONLY:",
+  "- Monetary policy: Fed rate decisions, FOMC statements/minutes, Fed member speeches, any major central bank (ECB, BOE, BOJ)",
+  "- Labor market: NFP, JOLTS, Weekly Jobless Claims, ADP Employment, Unemployment Rate, Average Hourly Earnings",
+  "- Inflation: CPI, Core CPI, PPI, Core PPI, PCE, Core PCE",
+  "- Growth: GDP (advance/prelim/final), GDPNow",
+  "- Sentiment & Manufacturing: ISM Manufacturing, ISM Services, PMI (Mfg & Services), Consumer Confidence, UoM Consumer Sentiment",
+  "- Energy: EIA Crude Oil Inventories, EIA Natural Gas Storage",
+  "- London metals session: Gold, Silver, Copper and Platinum London fix or LME reports",
+  "- Any other HIGH or MEDIUM impact USD event",
+  "EXCLUDE: Low impact events, non-USD currency data (except London metals), routine housing data.",
+  "For each included report list: name, actual vs forecast, beat or miss.",
+  "INTELLIGENT SCORING RULES - use context to determine score, do not treat all reports equally:",
+  "TIER 1 (highest weight - market-moving): Fed rate decision, FOMC statement, NFP, CPI, Core CPI, PCE, Core PCE. These can single-handedly move NQ 1-2%. If any Tier 1 report released today, it dominates the score.",
+  "TIER 2 (high weight - currently Fed-focused): JOLTS, Jobless Claims, ADP, Unemployment Rate, PPI. IMPORTANT NUANCE FOR JOLTS AND LABOR DATA: A JOLTS beat (more openings) signals strong economy which is BULLISH for earnings and risk assets UNLESS the market is specifically worried about Fed overtightening. In the current environment where market has largely priced in higher-for-longer, a strong labor market = strong economy = bullish for equities. Only score labor beats as bearish if there is an active Fed meeting imminent or CPI is running hot simultaneously. Jobless Claims rising = bearish (layoffs), Jobless Claims falling = bullish (employment strong).",
+  "TIER 3 (medium weight): GDP, ISM, PMI, Consumer Confidence, UoM Sentiment, Average Hourly Earnings.",
+  "TIER 4 (lower weight): Oil inventories, Natural Gas, London metals fixes.",
+  "MARKET REGIME AWARENESS - critical for correct scoring:",
+  "GOOD NEWS IS GOOD NEWS regime (current default): Strong economic data = bullish for equities. Use this when: inflation is trending down, Fed is on hold or cutting, no imminent rate hike fears.",
+  "BAD NEWS IS GOOD NEWS regime: Weak data = bullish because it forces Fed to cut. Use this when: inflation is running very hot AND Fed is actively hiking.",
+  "CURRENT REGIME (2025-2026): Inflation has cooled significantly from 2022 peaks. Fed has been cutting. Market is in GOOD NEWS IS GOOD NEWS mode. Therefore: strong labor data = bullish, strong GDP = bullish, strong ISM = bullish. Only flip to bearish if inflation re-accelerates sharply (CPI/PCE well above forecast).",
+  "SCORING LOGIC: Score based on the highest-tier reports released. A Tier 1 beat overrides mixed Tier 3 data. Mixed Tier 1 = neutral. Multiple Tier 2 beats with Tier 3 miss = lean bull. Use score: 1 (bull), -1 (bear), 0 (neutral). In your summary explain WHICH reports drove the score, WHY they matter more than others, and which market regime you are applying."
+].join(" ");
+
+const EARN_PROMPT = [
+  "From this earnings data, score based on INDEX IMPACT not equal weighting of all companies.",
+  "MEGA-CAP INDEX HEAVYWEIGHTS (highest weight - these move NQ/ES by themselves): NVDA, AAPL, MSFT, META, GOOGL, GOOG, AMZN, TSLA, AVGO, NFLX, AMD.",
+  "LARGE-CAP HIGH IMPACT (significant weight): JPM, GS, BAC, MS, V, MA, UNH, LLY, JNJ, XOM, CVX, CRM, ORCL, ADBE, QCOM, MU, INTC, NOW.",
+  "SECTOR BELLWETHERS (medium weight - moves sector not full index): Any company that is the largest in its sector.",
+  "SMALL/MID CAP (low weight - ignore unless massive beat/miss): Everything else.",
+  "SCORING LOGIC: If a mega-cap beats big = strong bull. If a mega-cap misses = strong bear. Multiple large-caps beating with no mega-cap = mild bull. All TBD = neutral. Mixed mega-caps = neutral.","CRITICAL RULE: Only score based on CONFIRMED actual EPS figures in the data provided. If epsActual shows TBD for all companies, score 0 neutral - do NOT use your own knowledge to guess results. Do not infer or assume any company beat or missed unless the actual number is explicitly in the data. If data shows all TBD, say so and score neutral.","MEGA-CAP PRECISION RULE: For mega-caps (NVDA, AAPL, MSFT, META, GOOGL, AMZN, TSLA, AVGO, NFLX, AMD) ANY miss is bearish regardless of size. These companies trade at premium valuations and the options market prices in perfection — even $0.01 miss can trigger a selloff. A BEAT of any size is bullish. IN-LINE is neutral. For large-caps use judgment — small misses under 1% can be treated as neutral.","DATA SOURCE: StockAnalysis.com which reports non-GAAP adjusted EPS — the same basis analysts use for estimates. This is the correct number to compare against consensus estimates.",
+  "In your summary, lead with the mega-cap and large-cap results first. Mention the company name and whether it beat or missed. Ignore or briefly mention small caps.",
+  "Score: 1 (bull), -1 (bear), 0 (neutral)."
+].join(" ");
+const PREMARKET_PROMPT = "From this CNBC data extract Asia and Europe overnight market performance and US futures direction (NQ, ES, DOW, YM). Name specific index levels or % changes if visible. Score bull if majority green, bear if majority red, neutral if mixed.";
+const NEWS_PROMPT = [
+  "From this CNBC markets page identify the most impactful stories for US index futures (NQ/ES) today.",
+  "INTELLIGENT WEIGHTING - use these severity levels:",
+
+  "LEVEL 5 - MARKET SHOCK OVERRIDE (these completely dominate all other signals including econ data):",
+  "- GEOPOLITICAL: Active military conflict outbreak or major escalation (US-Iran strike, Russia-NATO confrontation, China-Taiwan military action), terrorist attack on major financial center, oil embargo, Strait of Hormuz closure, nuclear/biological threat",
+  "- SYSTEMIC FINANCIAL: Unexpected major bank failure (SVB-scale or larger), sovereign debt crisis/default of major economy, sudden liquidity freeze, emergency central bank intervention outside scheduled meetings, flash crash",
+  "- NATURAL DISASTER/PANDEMIC: Major earthquake hitting financial hub, hurricane/flood shutting down key infrastructure, new pandemic declaration by WHO, supply chain catastrophe",
+  "- POLICY/REGULATORY SHOCK: Emergency presidential executive order affecting markets, surprise nationalization of major industry, sweeping antitrust breakup ruling on mega-cap (AAPL, GOOGL, META), extreme overnight tariff announcement (50%+ on major trade partner), crypto ban or asset freeze",
+  "- ELECTIONS & POLITICAL: Surprise election outcome reversing expected policy (unexpected party win, contested election results causing constitutional crisis), presidential impeachment or removal, major cabinet resignation during crisis",
+  "- CORPORATE MEGA-SHOCK: Sudden CEO removal of Magnificent 7 company, accounting fraud discovery at systemically important firm, unexpected merger of two index heavyweights",
+  "If ANY Level 5 event detected: score -1 AND include MARKET_SHOCK_OVERRIDE in summary. This tells the dashboard to discount all other signals.",
+
+  "LEVEL 4 - HIGHEST IMPACT (moves NQ 1%+ intraday, does not override but heavily weights score):",
+  "- Fed surprise rate move or emergency statement, major geopolitical tension spike, oil supply shock >5%, large tariff announcement on key sector, major country sanctions, significant election result (not crisis level), large-scale cyber attack on critical infrastructure",
+
+  "LEVEL 3 - HIGH IMPACT (significant move, normal scoring):",
+  "- Fed speaker hawkish/dovish pivot, Middle East escalation, China-US trade action, major tech regulatory action, broad risk-off catalyst, significant natural disaster affecting supply chains, election polls showing major shift",
+
+  "LEVEL 2 - MEDIUM IMPACT: Sector news, individual large-cap catalyst, routine policy update, moderate geopolitical tension",
+
+  "LEVEL 1 - LOW IMPACT (do not score): Routine analyst calls, minor company news, social media trends",
+
+  "SCORING LOGIC: Score based on highest severity level present. Level 5 = MARKET_SHOCK_OVERRIDE + score -1. Level 4 = strong -1. Level 3 = -1 or +1 depending on direction. In summary state: event name, severity level, and specifically why it moves NQ/ES.",
+  "Score: 1 (bull), -1 (bear), 0 (neutral)."
+].join(" ");
+
+// ── Main analyze endpoint ─────────────────────────────────────
+app.post("/api/analyze", async function(req, res) {
+  const topic = req.body && req.body.topic;
+  if (!topic) return res.status(400).json({ error: "No topic" });
+  if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ error: "API key not set" });
+  console.log("Analyzing:", topic);
+  try {
+    var rawData, prompt;
+    if      (topic === "econ")      { rawData = await fetchEcon();      prompt = ECON_PROMPT; }
+    else if (topic === "earn")      { rawData = await fetchEarnings();   prompt = EARN_PROMPT; }
+    else if (topic === "premarket") { rawData = await fetchPremarket();  prompt = PREMARKET_PROMPT; }
+    else if (topic === "news")      { rawData = await fetchNews();       prompt = NEWS_PROMPT; }
+    else return res.status(400).json({ error: "Unknown topic" });
+
+    console.log("Data length:", rawData.length);
+    const result = await callClaude(prompt, rawData);
+    console.log("Result:", JSON.stringify(result));
+    res.json(result);
+  } catch(e) {
+    console.error("Error for " + topic + ":", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── History endpoints ─────────────────────────────────────────
+app.post("/api/history/save", function(req, res) {
+  const { dateKey, snapshot } = req.body;
+  if (!dateKey || !snapshot) return res.status(400).json({ error: "Missing dateKey or snapshot" });
+  const history = loadHistory();
+  history[dateKey] = snapshot;
+  saveHistory(history);
+  console.log("Saved history for:", dateKey);
+  res.json({ ok: true, dateKey });
+});
+
+app.get("/api/history", function(req, res) {
+  res.json(loadHistory());
+});
+
+app.get("/api/history/:dateKey", function(req, res) {
+  const history = loadHistory();
+  const entry = history[req.params.dateKey];
+  if (!entry) return res.status(404).json({ error: "No data for this date" });
+  res.json(entry);
+});
+
+app.get("/health", function(req, res) {
+  res.json({ status: "ok", apiKeySet: !!process.env.ANTHROPIC_API_KEY });
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, function() { console.log("Morning brief server running on port " + PORT); });
