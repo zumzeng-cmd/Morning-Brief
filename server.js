@@ -86,43 +86,74 @@ async function fetchEarnings() {
   yesterday.setDate(yesterday.getDate() - 1);
   const todayStr = today.toISOString().slice(0, 10);
   const yestStr = yesterday.toISOString().slice(0, 10);
+  const FMP_KEY = process.env.FMP_API_KEY || "WQMcZiIIJ1rarvN3puluUNQoGXFdvkjg";
 
-  // Try multiple sources in order
-  async function trySource(url, headers) {
+  async function fetchFMP(dateStr) {
     try {
-      const html = await fetchUrl(url, headers || {});
-      const text = stripHtml(html, 4000);
-      if (text.length > 300) return text;
-      return "";
-    } catch(e) { return ""; }
+      const raw = await fetchUrl(
+        "https://financialmodelingprep.com/api/v3/earning_calendar?from=" + dateStr + "&to=" + dateStr + "&apikey=" + FMP_KEY
+      );
+      const json = JSON.parse(raw);
+      if (!Array.isArray(json) || json.length === 0) return [];
+      return json;
+    } catch(e) {
+      console.log("FMP error for " + dateStr + ": " + e.message);
+      return [];
+    }
   }
 
-  // Source 1: StockAnalysis main earnings page
-  let data = await trySource("https://stockanalysis.com/earnings-calendar/", {
-    "Referer": "https://stockanalysis.com/",
-    "Accept": "text/html,application/xhtml+xml"
+  const [todayRows, yestRows] = await Promise.all([fetchFMP(todayStr), fetchFMP(yestStr)]);
+
+  // Index heavyweights to highlight
+  const MEGA = ["NVDA","AAPL","MSFT","META","GOOGL","GOOG","AMZN","TSLA","AVGO","NFLX","AMD","BROADCOM"];
+  const LARGE = ["JPM","GS","BAC","MS","V","MA","UNH","LLY","CRM","ORCL","ADBE","QCOM","MU","NOW","INTC","XOM","CVX"];
+
+  function formatRow(r, tag) {
+    const isMega = MEGA.includes(r.symbol);
+    const isLarge = LARGE.includes(r.symbol);
+    const tier = isMega ? "[MEGA-CAP]" : isLarge ? "[LARGE-CAP]" : "[MID/SMALL]";
+    const epsAct = r.eps !== null && r.eps !== undefined ? parseFloat(r.eps).toFixed(2) : "TBD";
+    const epsEst = r.epsEstimated !== null && r.epsEstimated !== undefined ? parseFloat(r.epsEstimated).toFixed(2) : "N/A";
+    let beat = "";
+    if (epsAct !== "TBD" && epsEst !== "N/A") {
+      beat = parseFloat(epsAct) > parseFloat(epsEst) ? "BEAT" : parseFloat(epsAct) < parseFloat(epsEst) ? "MISS" : "IN-LINE";
+    }
+    const rev = r.revenue ? " | Rev: $" + (r.revenue/1e9).toFixed(2) + "B" : "";
+    const revEst = r.revenueEstimated ? " vs Est: $" + (r.revenueEstimated/1e9).toFixed(2) + "B" : "";
+    return tag + " " + tier + " " + r.symbol + " | EPS Act: " + epsAct + " vs Est: " + epsEst + " " + beat + rev + revEst + " | " + (r.time || "");
+  }
+
+  // Yesterday AMC
+  const yestAMC = yestRows.filter(r => r.time && r.time.toLowerCase().includes("amc"));
+  // Today BMO
+  const todayBMO = todayRows.filter(r => r.time && r.time.toLowerCase().includes("bmo"));
+  // All today
+  const todayAll = todayRows;
+
+  const seen = new Set();
+  const combined = [...yestAMC, ...todayBMO, ...todayAll].filter(r => {
+    if (seen.has(r.symbol)) return false;
+    seen.add(r.symbol);
+    return true;
   });
 
-  // Source 2: MarketWatch earnings calendar
-  if (!data) {
-    data = await trySource("https://www.marketwatch.com/tools/earnings-calendar", {
-      "Referer": "https://www.marketwatch.com/"
-    });
-  }
+  if (combined.length === 0) return "No earnings data from FMP for " + yestStr + " or " + todayStr + ".";
 
-  // Source 3: Benzinga earnings (no login required for basic calendar)
-  if (!data) {
-    data = await trySource("https://www.benzinga.com/calendars/earnings", {
-      "Referer": "https://www.benzinga.com/"
-    });
-  }
+  // Sort: mega-caps first, then large-caps, then rest
+  combined.sort((a, b) => {
+    const aScore = MEGA.includes(a.symbol) ? 0 : LARGE.includes(a.symbol) ? 1 : 2;
+    const bScore = MEGA.includes(b.symbol) ? 0 : LARGE.includes(b.symbol) ? 1 : 2;
+    return aScore - bScore;
+  });
 
-  // Source 4: Fall back to Claude knowledge
-  if (!data) {
-    return "Earnings calendar scraping unavailable from all sources. Today is " + todayStr + " and yesterday was " + yestStr + ". Use your knowledge to recall any major S&P500/Nasdaq companies that reported earnings yesterday after close or today before open. Focus on mega-caps: NVDA, AAPL, MSFT, META, GOOGL, AMZN, TSLA, AVGO, NFLX, AMD. State what you know about their results and score accordingly. If AVGO reported, note it beat non-GAAP EPS estimates.";
-  }
+  const lines = combined.slice(0, 40).map(r => {
+    const isYestAMC = yestAMC.some(y => y.symbol === r.symbol);
+    const isTodayBMO = todayBMO.some(b => b.symbol === r.symbol);
+    const tag = isYestAMC ? "[YEST AMC]" : isTodayBMO ? "[TODAY BMO]" : "[TODAY]";
+    return formatRow(r, tag);
+  });
 
-  return "EARNINGS DATA (today=" + todayStr + ", yesterday=" + yestStr + "):\n" + data;
+  return "EARNINGS (yesterday=" + yestStr + " AMC, today=" + todayStr + "):\n" + lines.join("\n");
 }
 
 async function fetchPremarket() {
