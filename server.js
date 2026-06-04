@@ -165,7 +165,7 @@ function callClaude(prompt, data) {
 
 // ── Prompts ───────────────────────────────────────────────────
 const ECON_PROMPT = [
-  "From this ForexFactory calendar data, extract ONLY the following report types and IGNORE everything else.",
+  "From this ForexFactory calendar data, extract ONLY reports that are scheduled for TODAY or were released TODAY. Strictly ignore any reports from yesterday or earlier even if they appear in the data. Today is " + new Date().toLocaleDateString("en-US", {weekday:"long", year:"numeric", month:"long", day:"numeric"}) + ".",
   "INCLUDE ONLY:",
   "- Monetary policy: Fed rate decisions, FOMC statements/minutes, Fed member speeches, any major central bank (ECB, BOE, BOJ)",
   "- Labor market: NFP, JOLTS, Weekly Jobless Claims, ADP Employment, Unemployment Rate, Average Hourly Earnings",
