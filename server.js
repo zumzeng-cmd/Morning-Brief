@@ -122,9 +122,9 @@ async function fetchEarnings() {
       // Convert FMP format to our expected format
       return json.map(r => ({
         symbol: r.symbol,
-        epsActual: r.eps,
+        epsActual: r.epsActual,
         epsEstimate: r.epsEstimated,
-        revenueActual: r.revenue,
+        revenueActual: r.revenueActual,
         revenueEstimate: r.revenueEstimated,
         hour: r.time || ""
       }));
