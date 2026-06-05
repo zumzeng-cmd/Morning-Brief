@@ -652,6 +652,9 @@ const MARKETS_PROMPT = [
   "2. implication: ONE specific sentence on what the current signals mean for this instrument today. Be specific — mention actual drivers (yields, risk-off, dollar strength, growth fears etc). No generic statements.",
   "3. keyLevel: one key level or price zone to watch today if known, or null if not applicable.",
   "4. divergence: true if this instrument is moving differently from what the overall bias would suggest, false otherwise.",
+  "5. bestSetup: true or false. For each sector group (equities, metals, energies), set bestSetup: true on EXACTLY ONE instrument — the one with the clearest directional conviction, strongest catalyst alignment, and best risk/reward today. Set false on all others in that group. DXY always gets bestSetup: true since it is the only instrument in its group.",
+  "6. setupDirection: if bestSetup is true, set this to either LONG or SHORT based on the bias. If bestSetup is false, set to null.",
+  "BEST SETUP SELECTION RULES: Choose the instrument where (a) the bias is clearly bull or bear (not neutral), (b) there is a specific named catalyst driving it today, (c) it aligns with the overall market bias rather than diverging from it, (d) it has a key level to define risk. If all instruments in a group are neutral, pick the one with the most potential for a move. Never pick a neutral instrument if a directional one exists in the group.",
   "INSTRUMENT-SPECIFIC RULES:",
   "ES/NQ/YM/RTY: Score from econ + earnings + news weighted by their dynamic weights. NQ is most sensitive to yields and tech. RTY is most sensitive to rate expectations and small-cap risk. YM is least tech-sensitive. If yields rising sharply, NQ bear > ES bear > YM bear.",
   "GC (Gold): Bull if risk-off OR dollar weakening OR inflation fears. Bear if dollar strengthening AND risk-on. Neutral if mixed. Rising yields without dollar strength = gold neutral to mildly bear.",
@@ -662,10 +665,10 @@ const MARKETS_PROMPT = [
   "NG (Natural Gas): Least correlated to macro — driven by weather/storage. Score neutral unless news card has specific NG catalyst.",
   "DXY: Bull if strong econ data (NFP beat, CPI hot) AND risk-off. Bear if risk-on AND weak data. Note: DXY and gold often inverse. Rising yields typically strengthen DXY.",
   "RETURN a JSON object with this exact structure:",
-  "{ \"equities\": { \"ES\": {\"bias\":\"bull\",\"implication\":\"..\",\"keyLevel\":\"5250\",\"divergence\":false}, \"NQ\":{...}, \"YM\":{...}, \"RTY\":{...} },",
+  "{ \"equities\": { \"ES\": {\"bias\":\"bull\",\"implication\":\"..\",\"keyLevel\":\"5250\",\"divergence\":false,\"bestSetup\":false,\"setupDirection\":null}, \"NQ\":{...}, \"YM\":{...}, \"RTY\":{...} },",
   "\"metals\": { \"GC\":{...}, \"SI\":{...}, \"HG\":{...}, \"PL\":{...} },",
   "\"energies\": { \"CL\":{...}, \"NG\":{...} },",
-  "\"dxy\": { \"DXY\":{...} } }"
+  "\"dxy\": { \"DXY\":{\"bias\":\"bull\",\"implication\":\"..\",\"keyLevel\":\"103.5\",\"divergence\":false,\"bestSetup\":true,\"setupDirection\":\"LONG\"} } }"
 ].join(" ");
 
 app.post("/api/markets", async function(req, res) {
