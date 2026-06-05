@@ -198,8 +198,91 @@ async function fetchEarnings() {
 }
 
 async function fetchPremarket() {
-  const html = await fetchUrl("https://www.cnbc.com/world/?region=world");
-  return stripHtml(html, 2500);
+  const FINNHUB_KEY = process.env.FINNHUB_API_KEY || "d8gh1phr01qlgcujfjfgd8gh1phr01qlgcujfjg0";
+
+  // ETF proxies for international indices (free tier compatible)
+  const symbols = [
+    // Asia ETF proxies
+    { symbol: "EWH",  label: "HSI (Hang Seng)",       region: "asia" },
+    { symbol: "EWJ",  label: "Nikkei 225",             region: "asia" },
+    { symbol: "EWA",  label: "ASX 200",                region: "asia" },
+    { symbol: "MCHI", label: "Shanghai Composite",     region: "asia" },
+    { symbol: "EWS",  label: "STI (Singapore)",        region: "asia" },
+    // Europe ETF proxies
+    { symbol: "VGK",  label: "STOXX 600",              region: "europe" },
+    { symbol: "EWG",  label: "DAX",                    region: "europe" },
+    { symbol: "EWU",  label: "FTSE 100",               region: "europe" },
+    { symbol: "EWN",  label: "AEX (Netherlands)",      region: "europe" },
+    { symbol: "EWQ",  label: "CAC 40",                 region: "europe" },
+    // US Futures
+    { symbol: "NQ=F", label: "NQ Futures",             region: "us" },
+    { symbol: "ES=F", label: "ES Futures",             region: "us" },
+    { symbol: "YM=F", label: "DOW Futures",            region: "us" },
+  ];
+
+  try {
+    // Fetch all quotes in parallel — Finnhub free tier: 60 calls/min, well within limit
+    const results = await Promise.all(symbols.map(async (s) => {
+      try {
+        const raw = await fetchUrl(
+          "https://finnhub.io/api/v1/quote?symbol=" + s.symbol + "&token=" + FINNHUB_KEY
+        );
+        const q = JSON.parse(raw);
+        // q.c = current price, q.dp = % change, q.d = change
+        if (!q || q.c === 0 || q.c === null || q.error) {
+          return { ...s, pct: null, status: "unavailable" };
+        }
+        const pct = parseFloat(q.dp) || 0;
+        const status = pct > 0.1 ? "up" : pct < -0.1 ? "down" : "flat";
+        return { ...s, pct, price: q.c, status };
+      } catch(e) {
+        return { ...s, pct: null, status: "unavailable" };
+      }
+    }));
+
+    // Build readable text for Claude
+    const asia    = results.filter(r => r.region === "asia");
+    const europe  = results.filter(r => r.region === "europe");
+    const futures = results.filter(r => r.region === "us");
+
+    function formatRegion(items, regionName) {
+      const lines = items.map(r => {
+        if (r.status === "unavailable") return r.label + ": N/A";
+        const arrow = r.status === "up" ? "UP" : r.status === "down" ? "▼" : "FLAT";
+        const sign  = r.pct >= 0 ? "+" : "";
+        return r.label + ": " + arrow + " " + sign + r.pct.toFixed(2) + "%";
+      });
+      // Majority vote summary
+      const up   = items.filter(r => r.status === "up").length;
+      const down = items.filter(r => r.status === "down").length;
+      const verdict = up >= 3 ? "BULLISH" : down >= 3 ? "BEARISH" : "MIXED";
+      return regionName + " [" + verdict + "]:\n" + lines.join("\n");
+    }
+
+    function formatFutures(items) {
+      const lines = items.map(r => {
+        if (r.status === "unavailable") return r.label + ": N/A";
+        const arrow = r.status === "up" ? "UP" : r.status === "down" ? "▼" : "FLAT";
+        const sign  = r.pct >= 0 ? "+" : "";
+        return r.label + ": " + arrow + " " + sign + r.pct.toFixed(2) + "%";
+      });
+      return "US FUTURES:\n" + lines.join("\n");
+    }
+
+    const output = [
+      "PRE-MARKET DATA (ETF proxies for international indices):",
+      formatRegion(asia, "ASIA"),
+      formatRegion(europe, "EUROPE"),
+      formatFutures(futures)
+    ].join("\n\n");
+
+    console.log("Premarket: Finnhub data fetched successfully");
+    return output;
+
+  } catch(e) {
+    console.log("Finnhub premarket error:", e.message);
+    return null;
+  }
 }
 
 async function fetchNews() {
@@ -291,11 +374,14 @@ const EARN_PROMPT = [
 ].join(" ");
 
 const PREMARKET_PROMPT = [
-  "From this CNBC data extract Asia and Europe overnight market performance and US futures direction (NQ, ES, DOW, YM).",
-  "Name specific index levels or % changes if visible.",
-  "Score: bull if majority green, bear if majority red, neutral if mixed.",
+  "From this data, score pre-market sentiment for US index futures (NQ/ES) using this exact methodology:",
+  "ASIA SCORE: Evaluate these 5 indices individually — HSI (Hang Seng), Nikkei 225, ASX 200, Shanghai Composite, STI (Straits Times). For each: up = bullish, down = bearish, flat/missing = neutral. If 3 or more are bullish, Asia = bullish. If 3 or more are bearish, Asia = bearish. Otherwise Asia = neutral.",
+  "EUROPE SCORE: Evaluate these 5 indices individually — STOXX 600, DAX, FTSE 100, AEX, CAC 40. Apply the same majority rule: 3+ bullish = Europe bullish, 3+ bearish = Europe bearish, otherwise neutral.",
+  "US FUTURES: Note direction of NQ, ES, DOW/YM if visible. Use as tiebreaker only — do not let US futures override the Asia/Europe majority vote.",
+  "FINAL SIGNAL: If both Asia and Europe are bullish = bull. If both are bearish = bear. If they disagree or one is neutral = neutral. US futures break the tie if Asia and Europe split.",
+  "MAX SCORE RULE: Pre-market is a supporting indicator only. Hard cap score at +1 (bull) or -1 (bear). Never return a score outside the range of -1 to +1.",
+  "SUMMARY RULE: Your summary must state (1) Asia verdict with the specific indices that drove it, (2) Europe verdict with the specific indices that drove it, (3) US futures direction. Two sentences max.",
   "Score: bull=1, bear=-1, neutral=0.",
-  // ── MODIFIED: guidance is not applicable for premarket ──
   "JSON SCHEMA: {\"signal\":\"bull|bear|neutral\",\"summary\":\"2 sentence summary\",\"score\":1,\"guidance\":null}"
 ].join(" ");
 
@@ -409,8 +495,23 @@ app.post("/api/analyze", async function(req, res) {
       }
     } else if (topic === "premarket") {
       prompt = PREMARKET_PROMPT;
-      rawData = latestMakeData.premarket || await fetchPremarket();
-      if (latestMakeData.premarket) console.log("Premarket: using Make.com data");
+      if (latestMakeData.premarket && latestMakeData.premarket.length > 50) {
+        rawData = latestMakeData.premarket;
+        console.log("Premarket: using Make.com data");
+      } else {
+        rawData = await fetchPremarket();
+        if (rawData) {
+          console.log("Premarket: using Finnhub ETF data");
+        } else {
+          // Finnhub failed — fall back to web search
+          const today2 = new Date();
+          const todayStr2 = today2.toISOString().slice(0, 10);
+          rawData = "NO EXTERNAL DATA";
+          prompt = PREMARKET_PROMPT + " Search the web for today " + todayStr2 + " pre-market performance of: HSI (Hang Seng), Nikkei 225, ASX 200, Shanghai Composite, STI. Also STOXX 600, DAX, FTSE 100, AEX, CAC 40. Also NQ futures, ES futures, DOW futures. State % change for each.";
+          useSearch = true;
+          console.log("Premarket: using web search fallback");
+        }
+      }
     } else if (topic === "news") {
       prompt = NEWS_PROMPT;
       rawData = latestMakeData.news || await fetchNews();
