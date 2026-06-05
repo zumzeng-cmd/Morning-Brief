@@ -595,6 +595,55 @@ async function runAll(){
   running=false;
   btn.disabled=false;btn.textContent='↺ REFRESH ANALYSIS';
   document.getElementById('footerNote').textContent='Last run: '+new Date().toLocaleTimeString()+' · Auto-saved to history';
+
+  // ── Auto-load markets tab in background after analysis completes ──
+  loadMarketsBackground();
+}
+
+async function loadMarketsBackground() {
+  // Update the markets button to show it's loading
+  var marketsBtn = document.getElementById('marketsRefreshBtn');
+  if (marketsBtn) {
+    marketsBtn.disabled = true;
+    marketsBtn.textContent = '⧖ UPDATING...';
+  }
+  document.getElementById('marketsContent').innerHTML = '<div class="markets-empty">Updating market implications...</div>';
+
+  try {
+    var res = await fetch(BASE + '/api/markets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        econ: lastResults && lastResults.econ ? lastResults.econ : null,
+        earn: lastResults && lastResults.earn ? lastResults.earn : null,
+        premarket: lastResults && lastResults.premarket ? lastResults.premarket : null,
+        news: lastResults && lastResults.news ? lastResults.news : null,
+        metaScore: lastMetaScore || null
+      })
+    });
+    var data = await res.json();
+    if (data.error) throw new Error(data.error);
+    lastMarketResults = data;
+
+    var html = '';
+    html += renderMarketsSection('EQUITIES', {ES:1,NQ:1,YM:1,RTY:1}, data.equities);
+    html += renderMarketsSection('METALS', {GC:1,SI:1,HG:1,PL:1}, data.metals);
+    html += renderMarketsSection('ENERGIES', {CL:1,NG:1}, data.energies);
+    html += renderMarketsSection('DOLLAR INDEX', {DXY:1}, data.dxy);
+
+    document.getElementById('marketsContent').innerHTML = html || '<div class="markets-empty">No data returned.</div>';
+    if (marketsBtn) {
+      marketsBtn.disabled = false;
+      marketsBtn.textContent = '↺ REFRESH IMPLICATIONS';
+    }
+  } catch(e) {
+    console.error('Markets background error:', e);
+    document.getElementById('marketsContent').innerHTML = '<div class="markets-empty">Click Refresh Implications to load market data.</div>';
+    if (marketsBtn) {
+      marketsBtn.disabled = false;
+      marketsBtn.textContent = '↺ REFRESH IMPLICATIONS';
+    }
+  }
 }
 
 // history
@@ -661,41 +710,8 @@ function renderMarketsSection(title, instruments, data) {
 var lastMarketResults = null;
 
 async function loadMarkets() {
-  var btn = document.getElementById('marketsRefreshBtn');
-  btn.disabled = true;
-  btn.textContent = '⧖ GENERATING...';
-  document.getElementById('marketsContent').innerHTML = '<div class="markets-empty">Fetching market implications from Claude...</div>';
-
-  try {
-    var res = await fetch(BASE + '/api/markets', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        econ: lastResults && lastResults.econ ? lastResults.econ : null,
-        earn: lastResults && lastResults.earn ? lastResults.earn : null,
-        premarket: lastResults && lastResults.premarket ? lastResults.premarket : null,
-        news: lastResults && lastResults.news ? lastResults.news : null,
-        metaScore: lastMetaScore || null
-      })
-    });
-    var data = await res.json();
-    if (data.error) throw new Error(data.error);
-    lastMarketResults = data;
-
-    var html = '';
-    html += renderMarketsSection('EQUITIES', {ES:1,NQ:1,YM:1,RTY:1}, data.equities);
-    html += renderMarketsSection('METALS', {GC:1,SI:1,HG:1,PL:1}, data.metals);
-    html += renderMarketsSection('ENERGIES', {CL:1,NG:1}, data.energies);
-    html += renderMarketsSection('DOLLAR INDEX', {DXY:1}, data.dxy);
-
-    document.getElementById('marketsContent').innerHTML = html || '<div class="markets-empty">No data returned.</div>';
-  } catch(e) {
-    console.error('Markets error:', e);
-    document.getElementById('marketsContent').innerHTML = '<div class="markets-empty">Error loading market implications. Run analysis first.</div>';
-  }
-
-  btn.disabled = false;
-  btn.textContent = '↺ REFRESH IMPLICATIONS';
+  // Manual refresh — just delegates to the same background loader
+  await loadMarketsBackground();
 }
 
 async function loadHistory(){
