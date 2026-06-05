@@ -433,22 +433,25 @@ async function runAll(){
 
 // history
 function renderHistoryList(){
-  const keys=Object.keys(allHistory).sort().reverse();
-  const list=document.getElementById('historyList');
+  var keys=Object.keys(allHistory).sort().reverse();
+  var list=document.getElementById('historyList');
   if(keys.length===0){
-    list.innerHTML='<div class="no-history">No history yet — run your first analysis to start building the log.</div>';
+    list.innerHTML='<div class="no-history">No history yet. Run your first analysis to start building the log.</div>';
     return;
   }
-  list.innerHTML=keys.map(k=>{
-    const e=allHistory[k];
-    const norm=e.norm||0;
-    const color=norm>=2?'var(--bull)':norm<=-2?'#FF4444':'var(--accent2)';
-    return '<div class="history-item" data-key="'+k+'" onclick="loadDate(''+k+'')">' +
-      '<span class="hist-date">'+k+'</span>' +
-      '<span class="hist-bias" style="color:'+color+'">'+e.bias+'</span>' +
-      '<span class="hist-score" style="color:'+color+'">'+(norm>=0?'+':'')+norm.toFixed(1)+'</span>' +
-    '</div>';
-  }).join('');
+  var html='';
+  for(var i=0;i<keys.length;i++){
+    var k=keys[i];
+    var e=allHistory[k];
+    var norm=e.norm||0;
+    var color=norm>=2?'var(--bull)':norm<=-2?'#FF4444':'var(--accent2)';
+    html+='<div class="history-item" data-key="'+k+'" onclick="loadDate(this.dataset.key)">';
+    html+='<span class="hist-date">'+k+'</span>';
+    html+='<span class="hist-bias" style="color:'+color+'">'+e.bias+'</span>';
+    html+='<span class="hist-score" style="color:'+color+'">'+(norm>=0?'+':'')+norm.toFixed(1)+'</span>';
+    html+='</div>';
+  }
+  list.innerHTML=html;
 }
 
 async function loadHistory(){
