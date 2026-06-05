@@ -128,27 +128,36 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
     </div>
   </div>
 
+
+  <!-- dynamic rationale box -->
+  <div id="rationaleBox" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:10px 16px;margin-bottom:1rem;display:none;">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <span style="font-size:9px;letter-spacing:0.14em;color:var(--muted);text-transform:uppercase;white-space:nowrap;">&#9654; AI WEIGHTING</span>
+      <span style="font-size:11px;color:#8FA8B8;line-height:1.6;" id="rationaleText">Calculating dynamic weights...</span>
+    </div>
+  </div>
+
   <!-- cards -->
   <div class="grid">
     <div class="card" id="card-econ">
       <div class="card-hdr"><span class="card-title">📅 Econ Calendar</span><span class="card-sig sig-neu" id="sig-econ">NEUTRAL</span></div>
       <div class="card-body idle" id="body-econ">Run analysis to fetch today's reports...</div>
-      <div class="card-footer"><span class="card-pts pts-neu" id="pts-econ">0.0</span><span class="card-weight">Weight: 3×</span></div>
+      <div class="card-footer"><span class="card-pts pts-neu" id="pts-econ">0.0</span><span class="card-weight" id="wt-econ">Weight: —</span></div>
     </div>
     <div class="card" id="card-earn">
       <div class="card-hdr"><span class="card-title">📊 Earnings</span><span class="card-sig sig-neu" id="sig-earn">NEUTRAL</span></div>
       <div class="card-body idle" id="body-earn">Run analysis to check earnings...</div>
-      <div class="card-footer"><span class="card-pts pts-neu" id="pts-earn">0.0</span><span class="card-weight">Weight: 2×</span></div>
+      <div class="card-footer"><span class="card-pts pts-neu" id="pts-earn">0.0</span><span class="card-weight" id="wt-earn">Weight: —</span></div>
     </div>
     <div class="card" id="card-premarket">
       <div class="card-hdr"><span class="card-title">🌏 Pre-Market</span><span class="card-sig sig-neu" id="sig-premarket">NEUTRAL</span></div>
       <div class="card-body idle" id="body-premarket">Run analysis to check overnight markets...</div>
-      <div class="card-footer"><span class="card-pts pts-neu" id="pts-premarket">0.0</span><span class="card-weight">Weight: 1×</span></div>
+      <div class="card-footer"><span class="card-pts pts-neu" id="pts-premarket">0.0</span><span class="card-weight" id="wt-premarket">Weight: —</span></div>
     </div>
     <div class="card" id="card-news">
       <div class="card-hdr"><span class="card-title">📰 Market News</span><span class="card-sig sig-neu" id="sig-news">NEUTRAL</span></div>
       <div class="card-body idle" id="body-news">Run analysis to scan headlines...</div>
-      <div class="card-footer"><span class="card-pts pts-neu" id="pts-news">0.0</span><span class="card-weight">Weight: 2×</span></div>
+      <div class="card-footer"><span class="card-pts pts-neu" id="pts-news">0.0</span><span class="card-weight" id="wt-news">Weight: —</span></div>
     </div>
   </div>
 
@@ -191,8 +200,8 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 </div>
 
 <script>
-// ── MODIFIED: premarket weight changed from 2 to 1 ──
-const WEIGHTS={econ:3,earn:2,premarket:1,news:2};
+// Dynamic weights — updated by meta-score after each run. Fallback values used until meta-score returns.
+let WEIGHTS={econ:3,earn:2,premarket:1,news:2};
 const MAX=Object.values(WEIGHTS).reduce((a,b)=>a+b,0);
 let scores={econ:0,earn:0,premarket:0,news:0};
 let overrides={econ:null,earn:null,premarket:null,news:null};
@@ -426,6 +435,65 @@ async function runAll(){
     await new Promise(r=>setTimeout(r,1500));
   }
   await saveSnapshot(results);
+
+  // ── Meta-score: ask Claude to dynamically weight all 4 signals ──
+  var rationaleBox = document.getElementById('rationaleBox');
+  var rationaleText = document.getElementById('rationaleText');
+  rationaleBox.style.display = 'flex';
+  rationaleText.textContent = 'Calculating dynamic weights...';
+  try {
+    var metaRes = await fetch(BASE + '/api/meta-score', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        econ: results.econ || null,
+        earn: results.earn || null,
+        premarket: results.premarket || null,
+        news: results.news || null
+      })
+    });
+    var metaData = await metaRes.json();
+    if (metaData && metaData.weights) {
+      WEIGHTS = metaData.weights;
+
+      // Update weight labels and pts on each card
+      ['econ','earn','premarket','news'].forEach(function(k) {
+        var wtEl = document.getElementById('wt-' + k);
+        var w = metaData.weights[k] || 1;
+        var stars = Array(w+1).join('★');
+        if (wtEl) wtEl.textContent = 'Weight: ' + w + '×  ' + stars;
+        var sc = scores[k] || 0;
+        var pts = sc * w;
+        var ptsEl = document.getElementById('pts-' + k);
+        if (ptsEl) {
+          ptsEl.textContent = (pts >= 0 ? '+' : '') + pts.toFixed(1);
+          ptsEl.className = 'card-pts ' + (pts > 0 ? 'pts-bull' : pts < 0 ? 'pts-bear' : 'pts-neu');
+        }
+      });
+
+      // Update bias banner
+      var sig = (metaData.signal || 'neutral').toLowerCase();
+      var color = sig === 'bull' ? '#7AE89A' : sig === 'bear' ? '#E87A7A' : 'var(--accent2)';
+      var label = metaData.biasLabel || (sig === 'bull' ? 'MILDLY BULLISH' : sig === 'bear' ? 'MILDLY BEARISH' : 'MIXED / NEUTRAL');
+      document.getElementById('biasValue').textContent = label;
+      document.getElementById('biasValue').style.color = color;
+      var ws = parseFloat(metaData.weightedScore) || 0;
+      document.getElementById('aggScore').textContent = (ws >= 0 ? '+' : '') + ws.toFixed(1);
+      document.getElementById('aggScore').style.color = color;
+      var pct = ((Math.max(-1, Math.min(1, ws)) + 1) / 2 * 100).toFixed(1);
+      document.getElementById('scoreBar').style.width = pct + '%';
+      document.getElementById('scoreBar').style.background = color;
+      rationaleText.textContent = metaData.rationale || 'Dynamic weighting applied.';
+    } else {
+      rationaleText.textContent = 'Dynamic weighting unavailable — using fixed weights.';
+      updateBias();
+    }
+  } catch(e) {
+    console.error('Meta-score error:', e);
+    rationaleText.textContent = 'Dynamic weighting unavailable — using fixed weights.';
+    updateBias();
+  }
+
   running=false;
   btn.disabled=false;btn.textContent='↺ REFRESH ANALYSIS';
   document.getElementById('footerNote').textContent='Last run: '+new Date().toLocaleTimeString()+' · Auto-saved to history';
