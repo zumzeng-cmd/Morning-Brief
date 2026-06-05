@@ -269,12 +269,12 @@ const ECON_PROMPT = [
 
 const SUMMARY_PROMPT = [
   "You are a professional futures day trader writing a pre-market brief. Given the four scored inputs below, write a single cohesive morning summary.",
-  "FORMAT: Start with the overall bias in one sentence (e.g. 'Bias is MILDLY BEARISH heading into the open.'). Then 2-3 sentences explaining the primary drivers — what is actually moving the market today. End with one actionable sentence for NQ/ES futures trading (e.g. 'Watch for selling pressure on NQ at open, key support at X.').",
+  "FORMAT: Start with the overall bias in one sentence (e.g. 'Bias is MILDLY BEARISH heading into the open.'). Then 2-3 sentences explaining the primary drivers — what is actually moving the market today. End with one actionable sentence for NQ/ES futures trading.",
   "TONE: Professional, direct, no fluff. Like a senior trader talking to a junior trader before the bell.",
   "INCLUDE: The most important data points — specific numbers, company names, report names. Do not be vague.",
-  "DO NOT include: Level labels, score numbers, the word 'aggregate', or meta-commentary about the dashboard.",
+  "DO NOT include: Level labels, score numbers, the word aggregate, or meta-commentary about the dashboard.",
   "LENGTH: 4-6 sentences maximum.",
-  "Return plain text only — no JSON, no markdown, no bullet points."
+  "CRITICAL: Reply ONLY with raw JSON format — {signal, summary, score} — where signal is bull/bear/neutral, summary is your 4-6 sentence plain text analysis, and score is -1 to 1."
 ].join(" ");
 
 const EARN_PROMPT = [
@@ -437,39 +437,20 @@ app.post("/api/summary", async function(req, res) {
 
   try {
     const today = new Date().toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
-    const payload = JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 300,
-      system: "You are a professional futures day trader writing a pre-market brief. Today is " + today + ". Reply with plain text only — no JSON, no markdown, no bullet points.",
-      messages: [{ role: "user", content: SUMMARY_PROMPT + "\n\nINPUTS:\n" + context }]
-    });
-
-    const https = require("https");
-    const options = {
-      hostname: "api.anthropic.com", path: "/v1/messages", method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Content-Length": Buffer.byteLength(payload),
-        "x-api-key": process.env.ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01"
-      }
-    };
-
-    const apiReq = https.request(options, apiRes => {
-      let raw = "";
-      apiRes.on("data", c => raw += c);
-      apiRes.on("end", () => {
-        try {
-          const parsed = JSON.parse(raw);
-          const text = (parsed.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
-          res.json({ summary: text });
-        } catch(e) { res.status(500).json({ error: e.message }); }
-      });
-    });
-    apiReq.on("error", e => res.status(500).json({ error: e.message }));
-    apiReq.write(payload);
-    apiReq.end();
+    // Use callClaude which already handles Anthropic API calls correctly
+    const result = await callClaude(SUMMARY_PROMPT + "\n\nINPUTS:\n" + context, "", false);
+    // callClaude expects JSON back but summary returns plain text — handle both
+    if (result && result.summary) {
+      res.json({ summary: result.summary });
+    } else if (typeof result === "string") {
+      res.json({ summary: result });
+    } else {
+      // callClaude parsed JSON — extract any text field
+      const text = result.summary || result.signal || JSON.stringify(result);
+      res.json({ summary: text });
+    }
   } catch(e) {
+    console.error("Summary error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
