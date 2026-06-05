@@ -623,15 +623,16 @@ app.post("/api/meta-score", async function(req, res) {
     const rawWeighted = Object.keys(weights).reduce((s, k) => s + (cardScores[k] || 0) * (weights[k] || 0), 0);
     const weightedScore = totalWeight > 0 ? parseFloat((rawWeighted / totalWeight).toFixed(2)) : 0;
 
-    // Deterministic bias label from exact thresholds
+    // Deterministic bias label — thresholds scaled to -1.0/+1.0 range
+    // Possible range: -1.0 (all cards bear, max weights) to +1.0 (all cards bull, max weights)
     let signal, biasLabel;
-    if      (weightedScore >=  2.0) { signal = "bull";    biasLabel = "STRONGLY BULLISH"; }
-    else if (weightedScore >=  1.2) { signal = "bull";    biasLabel = "BULLISH"; }
-    else if (weightedScore >=  0.6) { signal = "bull";    biasLabel = "MILDLY BULLISH"; }
-    else if (weightedScore >  -0.6) { signal = "neutral"; biasLabel = "MIXED / NEUTRAL"; }
-    else if (weightedScore >  -1.2) { signal = "bear";    biasLabel = "MILDLY BEARISH"; }
-    else if (weightedScore >  -2.0) { signal = "bear";    biasLabel = "BEARISH"; }
-    else                            { signal = "bear";    biasLabel = "STRONGLY BEARISH"; }
+    if      (weightedScore >=  0.50) { signal = "bull";    biasLabel = "STRONGLY BULLISH"; }
+    else if (weightedScore >=  0.30) { signal = "bull";    biasLabel = "BULLISH"; }
+    else if (weightedScore >=  0.15) { signal = "bull";    biasLabel = "MILDLY BULLISH"; }
+    else if (weightedScore >  -0.15) { signal = "neutral"; biasLabel = "MIXED / NEUTRAL"; }
+    else if (weightedScore >  -0.30) { signal = "bear";    biasLabel = "MILDLY BEARISH"; }
+    else if (weightedScore >  -0.50) { signal = "bear";    biasLabel = "BEARISH"; }
+    else                             { signal = "bear";    biasLabel = "STRONGLY BEARISH"; }
 
     const finalResult = {
       weights,
