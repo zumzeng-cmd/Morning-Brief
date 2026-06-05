@@ -128,6 +128,15 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
     </div>
   </div>
 
+  <!-- master summary -->
+  <div id="summaryBox" style="display:none;background:linear-gradient(135deg,#0d1f0d,#0a1a1a);border:1px solid var(--green);border-radius:6px;padding:1rem 1.2rem;margin-bottom:1rem;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem;">
+      <span style="font-size:10px;font-weight:700;letter-spacing:.12em;color:var(--green);text-transform:uppercase;">📋 Morning Brief Summary</span>
+      <span style="font-size:10px;color:var(--muted);" id="summaryTime"></span>
+    </div>
+    <div style="font-family:'Courier New',monospace;font-size:12px;line-height:1.7;color:#e0e0e0;" id="summaryText">Generating summary...</div>
+  </div>
+
   <!-- cards -->
   <div class="grid">
     <div class="card" id="card-econ">
@@ -436,6 +445,31 @@ async function runAll(){
     await new Promise(r=>setTimeout(r,1500));
   }
   await saveSnapshot(results);
+
+  // Generate master summary from all 4 card results
+  try {
+    const summaryBox = document.getElementById('summaryBox');
+    const summaryText = document.getElementById('summaryText');
+    const summaryTime = document.getElementById('summaryTime');
+    summaryBox.style.display = 'block';
+    summaryText.textContent = 'Generating summary...';
+    const sumRes = await fetch(BASE + '/api/summary', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        econ: results.econ,
+        earnings: results.earn,
+        premarket: results.premarket,
+        news: results.news
+      })
+    });
+    const sumData = await sumRes.json();
+    summaryText.textContent = sumData.summary || 'Unable to generate summary.';
+    summaryTime.textContent = new Date().toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit' });
+  } catch(e) {
+    document.getElementById('summaryText').textContent = 'Summary unavailable.';
+  }
+
   running=false;
   btn.disabled=false;btn.textContent='↺ REFRESH ANALYSIS';
   document.getElementById('footerNote').textContent='Last run: '+new Date().toLocaleTimeString()+' · Auto-saved to history';
