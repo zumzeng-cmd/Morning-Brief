@@ -529,6 +529,92 @@ app.post("/api/analyze", async function(req, res) {
   }
 });
 
+
+// ── Meta-score endpoint ───────────────────────────────────────
+// Takes all 4 card results, asks Claude to assign dynamic weights
+// and return a final weighted bias with rationale.
+const META_PROMPT = [
+  "You are a senior futures trader reviewing today's morning brief. You have 4 signal cards below.",
+  "Your job: assign a DYNAMIC WEIGHT (1-5) to each card based on which is most likely to move NQ/ES index futures TODAY.",
+  "WEIGHTING RULES:",
+  "Weight 5 = Market-defining event (NFP, CPI, FOMC, mega-cap earnings shock, geopolitical crisis). Everything else is noise.",
+  "Weight 4 = High impact (strong supporting data, sector-moving earnings, major yield move).",
+  "Weight 3 = Moderate impact (confirming signal, mid-cap earnings, regional market moves).",
+  "Weight 2 = Low impact (background noise, already priced in, conflicting signals).",
+  "Weight 1 = Negligible (stale data, no confirmed actuals, neutral/mixed with no clear direction).",
+  "DYNAMIC RULES: On NFP/CPI/FOMC days, econ gets 5 and pre-market gets 1 (pre-market just reflects the same data). On mega-cap earnings days with no macro, earnings gets 5. Pre-market max weight is 2 on days with major macro catalysts. News max weight is 4 (never 5 unless MARKET_SHOCK_OVERRIDE).",
+  "FINAL BIAS: Calculate weighted_score = sum(score * weight) for each card. Divide by sum(weights). Then: >=0.5 = bull, <=-0.5 = bear, else neutral.",
+  "RATIONALE: One sentence explaining what is driving the market today and why you weighted things the way you did.",
+  "JSON SCHEMA: {",
+  "  \"weights\": {\"econ\":3,\"earn\":1,\"premarket\":1,\"news\":2},",
+  "  \"weightedScore\": 0.5,",
+  "  \"signal\": \"bull|bear|neutral\",",
+  "  \"biasLabel\": \"MILDLY BULLISH\",",
+  "  \"rationale\": \"One sentence explaining today's dominant driver.\"",
+  "}"
+].join(" ");
+
+app.post("/api/meta-score", async function(req, res) {
+  const { econ, earn, premarket, news } = req.body;
+  if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ error: "API key not set" });
+
+  try {
+    const today = new Date().toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
+    const etTime = new Date().toLocaleTimeString("en-US", { hour:"2-digit", minute:"2-digit", hour12:true, timeZone:"America/New_York" });
+
+    const cardSummary = [
+      "TODAY IS " + today + ", TIME (ET): " + etTime,
+      "",
+      "ECON CALENDAR: signal=" + (econ ? econ.signal : "neutral") + ", score=" + (econ ? econ.score : 0) + ", summary=" + (econ ? econ.summary : "No data"),
+      "EARNINGS: signal=" + (earn ? earn.signal : "neutral") + ", score=" + (earn ? earn.score : 0) + ", summary=" + (earn ? earn.summary : "No data"),
+      "PRE-MARKET: signal=" + (premarket ? premarket.signal : "neutral") + ", score=" + (premarket ? premarket.score : 0) + ", summary=" + (premarket ? premarket.summary : "No data"),
+      "MARKET NEWS: signal=" + (news ? news.signal : "neutral") + ", score=" + (news ? news.score : 0) + ", summary=" + (news ? news.summary : "No data"),
+    ].join("\n");
+
+    const body = {
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 400,
+      system: "You are a futures trader bias engine. CRITICAL: Reply ONLY with raw JSON, no markdown, no backticks, no explanation.",
+      messages: [{ role: "user", content: META_PROMPT + "\n\nDATA:\n" + cardSummary }]
+    };
+
+    const payload = JSON.stringify(body);
+    const headers = {
+      "Content-Type": "application/json",
+      "Content-Length": Buffer.byteLength(payload),
+      "x-api-key": process.env.ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01"
+    };
+
+    const result = await new Promise((resolve, reject) => {
+      const options = { hostname: "api.anthropic.com", path: "/v1/messages", method: "POST", headers };
+      const req2 = https.request(options, r => {
+        let raw = "";
+        r.on("data", c => raw += c);
+        r.on("end", () => {
+          try {
+            const parsed = JSON.parse(raw);
+            if (parsed.error) return reject(new Error(parsed.error.message));
+            const text = (parsed.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
+            const cleaned = text.replace(/```json|```/g, "").trim();
+            resolve(JSON.parse(cleaned));
+          } catch(e) { reject(new Error("Parse error: " + e.message)); }
+        });
+      });
+      req2.on("error", reject);
+      req2.write(payload);
+      req2.end();
+    });
+
+    console.log("Meta-score result:", JSON.stringify(result));
+    res.json(result);
+  } catch(e) {
+    console.error("Meta-score error:", e.message);
+    // Fallback: return equal weights if meta-score fails
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── History endpoints ─────────────────────────────────────────
 app.post("/api/history/save", function(req, res) {
   const { dateKey, snapshot } = req.body;
