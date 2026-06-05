@@ -92,6 +92,59 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 .hist-bias{font-family:var(--font-display);font-size:14px;letter-spacing:1px;flex:1;}
 .hist-score{font-family:var(--font-display);font-size:16px;min-width:50px;text-align:right;}
 .no-history{font-size:12px;color:var(--muted);font-style:italic;padding:1rem 0;}
+
+/* markets tab */
+.markets-section { margin-bottom: 1rem; }
+.markets-group-title {
+  font-size: 9px; letter-spacing: 0.18em; color: var(--muted);
+  text-transform: uppercase; padding: 10px 0 6px;
+  border-bottom: 1px solid var(--border); margin-bottom: 8px;
+  display: flex; align-items: center; gap: 8px;
+}
+.markets-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 1rem; }
+@media(max-width:640px){ .markets-grid { grid-template-columns: 1fr; } }
+.market-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 4px; overflow: hidden; transition: border-color 0.3s;
+}
+.market-card.bull { border-color: rgba(0,255,148,0.25); }
+.market-card.bear { border-color: rgba(255,68,68,0.25); }
+.market-card.diverge { border-color: rgba(255,184,0,0.35); }
+.market-card-hdr {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px; border-bottom: 1px solid var(--border);
+  background: var(--surface2);
+}
+.market-ticker { font-family: var(--font-display); font-size: 18px; letter-spacing: 2px; }
+.market-ticker.bull { color: var(--bull); }
+.market-ticker.bear { color: var(--bear); }
+.market-ticker.neutral { color: var(--muted); }
+.market-name { font-size: 9px; color: var(--muted); letter-spacing: 0.08em; margin-top: 1px; }
+.market-sig {
+  font-size: 10px; font-weight: 500; padding: 2px 8px;
+  border-radius: 2px; letter-spacing: 0.08em;
+}
+.market-body { padding: 10px 12px; font-size: 11px; line-height: 1.65; color: #8FA8B8; }
+.market-footer {
+  padding: 6px 12px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.market-keylevel { font-size: 10px; color: var(--muted); }
+.market-keylevel span { color: var(--accent2); font-family: var(--font-display); font-size: 13px; margin-left: 4px; }
+.diverge-badge {
+  font-size: 9px; padding: 1px 6px; border-radius: 2px;
+  background: rgba(255,184,0,0.1); color: var(--accent2);
+  border: 1px solid rgba(255,184,0,0.3); letter-spacing: 0.08em;
+}
+.markets-refresh-btn {
+  width: 100%; padding: 12px; background: transparent;
+  border: 1px solid var(--border); color: var(--muted);
+  font-family: var(--font-display); font-size: 18px; letter-spacing: 3px;
+  border-radius: 4px; cursor: pointer; transition: all 0.2s; margin-bottom: 0.75rem;
+}
+.markets-refresh-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); background: rgba(0,255,148,0.05); }
+.markets-refresh-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.markets-empty { font-size: 12px; color: var(--muted); font-style: italic; padding: 2rem 0; text-align: center; }
 </style>
 </head>
 <body>
@@ -111,6 +164,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
   <div class="date-nav">
     <button class="dnbtn active" id="btnToday" onclick="switchToToday()">TODAY</button>
     <button class="dnbtn" id="btnHist" onclick="switchToHistory()">HISTORY</button>
+    <button class="dnbtn" id="btnMarkets" onclick="switchToMarkets()">MARKETS</button>
     <input type="date" id="datePicker" style="display:none;" onchange="loadDate(this.value)"/>
     <span class="mode-badge mode-live" id="modeBadge">LIVE</span>
   </div>
@@ -192,6 +246,15 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
   <button class="run-btn" id="runBtn" onclick="runAll()">▶ RUN MORNING ANALYSIS</button>
   <div class="footer-note" id="footerNote">Powered by Claude AI · Live data from FMP, Finnhub &amp; CNBC</div>
 
+
+  <!-- MARKETS TAB -->
+  <div id="panelMarkets" style="display:none;">
+    <button class="markets-refresh-btn" id="marketsRefreshBtn" onclick="loadMarkets()">&#9654; GENERATE MARKET IMPLICATIONS</button>
+    <div id="marketsContent">
+      <div class="markets-empty">Run analysis first, then generate market implications.</div>
+    </div>
+  </div>
+
   <!-- history -->
   <div class="history-section">
     <div class="history-title">HISTORY LOG</div>
@@ -208,6 +271,8 @@ let overrides={econ:null,earn:null,premarket:null,news:null};
 let running=false;
 let historyMode=false;
 let allHistory={};
+var lastResults={};
+var lastMetaScore=null;
 const BASE='';
 
 // clock
@@ -233,6 +298,10 @@ function switchToToday(){
   document.getElementById('runBtn').style.display='';
   document.getElementById('overrideRow').style.opacity='1';
   document.getElementById('overrideRow').style.pointerEvents='';
+  document.getElementById('panelMarkets').style.display='none';
+  document.querySelector('.grid').style.display='grid';
+  document.querySelector('.history-section').style.display='block';
+  var rb=document.getElementById('rationaleBox'); if(rb && Object.keys(allHistory).length>0) rb.style.display='flex';
   resetCards();
 }
 
@@ -246,7 +315,34 @@ function switchToHistory(){
   document.getElementById('runBtn').style.display='none';
   document.getElementById('overrideRow').style.opacity='0.3';
   document.getElementById('overrideRow').style.pointerEvents='none';
+  document.getElementById('panelMarkets').style.display='none';
+  document.querySelector('.grid').style.display='grid';
+  document.querySelector('.history-section').style.display='block';
   document.getElementById('datePicker').value=todayKey();
+}
+
+function switchToMarkets(){
+  historyMode=false;
+  document.getElementById('btnToday').classList.remove('active');
+  document.getElementById('btnHist').classList.remove('active');
+  document.getElementById('btnMarkets').classList.add('active');
+  document.getElementById('datePicker').style.display='none';
+  document.getElementById('modeBadge').textContent='MARKETS';
+  document.getElementById('modeBadge').className='mode-badge mode-hist';
+  document.getElementById('runBtn').style.display='none';
+  document.getElementById('overrideRow').style.opacity='0.3';
+  document.getElementById('overrideRow').style.pointerEvents='none';
+  document.getElementById('panelMarkets').style.display='block';
+  document.querySelector('.grid').style.display='none';
+  document.querySelector('.history-section').style.display='none';
+  var rationaleBox=document.getElementById('rationaleBox');
+  if(rationaleBox) rationaleBox.style.display='none';
+}
+
+function switchToTodayFull(){
+  document.getElementById('panelMarkets').style.display='none';
+  document.querySelector('.grid').style.display='grid';
+  document.querySelector('.history-section').style.display='block';
 }
 
 function loadDate(dateKey){
@@ -434,6 +530,7 @@ async function runAll(){
     }
     await new Promise(r=>setTimeout(r,1500));
   }
+  lastResults = results;
   await saveSnapshot(results);
 
   // ── Meta-score: ask Claude to dynamically weight all 4 signals ──
@@ -454,6 +551,7 @@ async function runAll(){
     });
     var metaData = await metaRes.json();
     if (metaData && metaData.weights) {
+      lastMetaScore = metaData;
       WEIGHTS = metaData.weights;
 
       // Update weight labels and pts on each card
@@ -520,6 +618,84 @@ function renderHistoryList(){
     html+='</div>';
   }
   list.innerHTML=html;
+}
+
+
+// Market names map
+var MARKET_NAMES = {
+  ES:'S&P 500 Futures', NQ:'Nasdaq 100 Futures', YM:'Dow Jones Futures', RTY:'Russell 2000 Futures',
+  GC:'Gold Futures', SI:'Silver Futures', HG:'Copper Futures', PL:'Platinum Futures',
+  CL:'Crude Oil Futures', NG:'Natural Gas Futures', DXY:'US Dollar Index'
+};
+
+function renderMarketCard(ticker, data) {
+  var bias = data.bias || 'neutral';
+  var borderClass = data.divergence ? 'diverge' : bias;
+  var sigClass = bias==='bull'?'sig-bull':bias==='bear'?'sig-bear':'sig-neu';
+  var sigLabel = bias==='bull'?'BULLISH':bias==='bear'?'BEARISH':'NEUTRAL';
+  var divergeBadge = data.divergence ? '<span class="diverge-badge">DIVERGING</span>' : '';
+  var keyLevel = data.keyLevel ? '<div class="market-keylevel">Watch:<span>'+data.keyLevel+'</span></div>' : '<div class="market-keylevel"></div>';
+  return '<div class="market-card '+borderClass+'">' +
+    '<div class="market-card-hdr">' +
+      '<div><div class="market-ticker '+bias+'">'+ticker+'</div><div class="market-name">'+( MARKET_NAMES[ticker]||'')+'</div></div>' +
+      '<div style="display:flex;align-items:center;gap:6px;">'+divergeBadge+'<span class="market-sig '+sigClass+'">'+sigLabel+'</span></div>' +
+    '</div>' +
+    '<div class="market-body">'+(data.implication||'No data.')+'</div>' +
+    '<div class="market-footer">'+keyLevel+'</div>' +
+  '</div>';
+}
+
+function renderMarketsSection(title, instruments, data) {
+  if (!data) return '';
+  var cards = Object.keys(instruments).map(function(ticker) {
+    var d = data[ticker];
+    if (!d) return '';
+    return renderMarketCard(ticker, d);
+  }).join('');
+  return '<div class="markets-section">' +
+    '<div class="markets-group-title">'+title+'</div>' +
+    '<div class="markets-grid">'+cards+'</div>' +
+  '</div>';
+}
+
+var lastMarketResults = null;
+
+async function loadMarkets() {
+  var btn = document.getElementById('marketsRefreshBtn');
+  btn.disabled = true;
+  btn.textContent = '⧖ GENERATING...';
+  document.getElementById('marketsContent').innerHTML = '<div class="markets-empty">Fetching market implications from Claude...</div>';
+
+  try {
+    var res = await fetch(BASE + '/api/markets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        econ: lastResults && lastResults.econ ? lastResults.econ : null,
+        earn: lastResults && lastResults.earn ? lastResults.earn : null,
+        premarket: lastResults && lastResults.premarket ? lastResults.premarket : null,
+        news: lastResults && lastResults.news ? lastResults.news : null,
+        metaScore: lastMetaScore || null
+      })
+    });
+    var data = await res.json();
+    if (data.error) throw new Error(data.error);
+    lastMarketResults = data;
+
+    var html = '';
+    html += renderMarketsSection('EQUITIES', {ES:1,NQ:1,YM:1,RTY:1}, data.equities);
+    html += renderMarketsSection('METALS', {GC:1,SI:1,HG:1,PL:1}, data.metals);
+    html += renderMarketsSection('ENERGIES', {CL:1,NG:1}, data.energies);
+    html += renderMarketsSection('DOLLAR INDEX', {DXY:1}, data.dxy);
+
+    document.getElementById('marketsContent').innerHTML = html || '<div class="markets-empty">No data returned.</div>';
+  } catch(e) {
+    console.error('Markets error:', e);
+    document.getElementById('marketsContent').innerHTML = '<div class="markets-empty">Error loading market implications. Run analysis first.</div>';
+  }
+
+  btn.disabled = false;
+  btn.textContent = '↺ REFRESH IMPLICATIONS';
 }
 
 async function loadHistory(){
