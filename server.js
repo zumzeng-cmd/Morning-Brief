@@ -638,6 +638,106 @@ app.get("/api/history/:dateKey", function(req, res) {
   res.json(entry);
 });
 
+
+// ── Markets implications endpoint ────────────────────────────
+const MARKETS_PROMPT = [
+  "You are a senior futures trader. Based on the morning brief signals below, provide specific trading implications for each of the following instruments.",
+  "INSTRUMENTS TO COVER:",
+  "EQUITIES: ES (S&P 500 futures), NQ (Nasdaq 100 futures), YM (Dow futures), RTY (Russell 2000 futures).",
+  "METALS: GC (Gold futures), SI (Silver futures), HG (Copper futures), PL (Platinum futures).",
+  "ENERGIES: CL (Crude Oil futures), NG (Natural Gas futures).",
+  "DOLLAR INDEX: DXY.",
+  "FOR EACH INSTRUMENT provide:",
+  "1. bias: bull, bear, or neutral",
+  "2. implication: ONE specific sentence on what the current signals mean for this instrument today. Be specific — mention actual drivers (yields, risk-off, dollar strength, growth fears etc). No generic statements.",
+  "3. keyLevel: one key level or price zone to watch today if known, or null if not applicable.",
+  "4. divergence: true if this instrument is moving differently from what the overall bias would suggest, false otherwise.",
+  "INSTRUMENT-SPECIFIC RULES:",
+  "ES/NQ/YM/RTY: Score from econ + earnings + news weighted by their dynamic weights. NQ is most sensitive to yields and tech. RTY is most sensitive to rate expectations and small-cap risk. YM is least tech-sensitive. If yields rising sharply, NQ bear > ES bear > YM bear.",
+  "GC (Gold): Bull if risk-off OR dollar weakening OR inflation fears. Bear if dollar strengthening AND risk-on. Neutral if mixed. Rising yields without dollar strength = gold neutral to mildly bear.",
+  "SI (Silver): Follows gold but amplified. Also sensitive to industrial demand (copper signal).",
+  "HG (Copper): Bull if global growth optimism and risk-on. Bear if growth fears, strong dollar, risk-off. China/Asia market performance from pre-market is key input.",
+  "PL (Platinum): Follows gold/silver direction but less correlated. Industrial + precious metal hybrid.",
+  "CL (Crude Oil): Bull if risk-on, weak dollar, Middle East tension. Bear if strong dollar, demand fears, risk-off. News card is primary input.",
+  "NG (Natural Gas): Least correlated to macro — driven by weather/storage. Score neutral unless news card has specific NG catalyst.",
+  "DXY: Bull if strong econ data (NFP beat, CPI hot) AND risk-off. Bear if risk-on AND weak data. Note: DXY and gold often inverse. Rising yields typically strengthen DXY.",
+  "RETURN a JSON object with this exact structure:",
+  "{ \"equities\": { \"ES\": {\"bias\":\"bull\",\"implication\":\"..\",\"keyLevel\":\"5250\",\"divergence\":false}, \"NQ\":{...}, \"YM\":{...}, \"RTY\":{...} },",
+  "\"metals\": { \"GC\":{...}, \"SI\":{...}, \"HG\":{...}, \"PL\":{...} },",
+  "\"energies\": { \"CL\":{...}, \"NG\":{...} },",
+  "\"dxy\": { \"DXY\":{...} } }"
+].join(" ");
+
+app.post("/api/markets", async function(req, res) {
+  const { econ, earn, premarket, news, metaScore } = req.body;
+  if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ error: "API key not set" });
+
+  try {
+    const today = new Date().toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
+    const etTime = new Date().toLocaleTimeString("en-US", { hour:"2-digit", minute:"2-digit", hour12:true, timeZone:"America/New_York" });
+
+    const context = [
+      "TODAY: " + today + " TIME (ET): " + etTime,
+      "",
+      "OVERALL BIAS: " + (metaScore ? metaScore.biasLabel + " (weighted score: " + metaScore.weightedScore + ")" : "Unknown"),
+      "RATIONALE: " + (metaScore ? metaScore.rationale : "N/A"),
+      "",
+      "ECON: signal=" + (econ ? econ.signal : "neutral") + ", score=" + (econ ? econ.score : 0) + ", weight=" + (metaScore && metaScore.weights ? metaScore.weights.econ : 3),
+      "Summary: " + (econ ? econ.summary : "No data"),
+      "",
+      "EARNINGS: signal=" + (earn ? earn.signal : "neutral") + ", score=" + (earn ? earn.score : 0) + ", weight=" + (metaScore && metaScore.weights ? metaScore.weights.earn : 2),
+      "Summary: " + (earn ? earn.summary : "No data"),
+      "",
+      "PRE-MARKET: signal=" + (premarket ? premarket.signal : "neutral") + ", score=" + (premarket ? premarket.score : 0) + ", weight=" + (metaScore && metaScore.weights ? metaScore.weights.premarket : 1),
+      "Summary: " + (premarket ? premarket.summary : "No data"),
+      "",
+      "MARKET NEWS: signal=" + (news ? news.signal : "neutral") + ", score=" + (news ? news.score : 0) + ", weight=" + (metaScore && metaScore.weights ? metaScore.weights.news : 2),
+      "Summary: " + (news ? news.summary : "No data"),
+    ].join("\n");
+
+    const body = {
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 1200,
+      system: "You are a futures trader market implications engine. CRITICAL: Reply ONLY with raw JSON matching the exact schema requested. No markdown, no backticks, no explanation.",
+      messages: [{ role: "user", content: MARKETS_PROMPT + "\n\nDATA:\n" + context }]
+    };
+
+    const payload = JSON.stringify(body);
+    const headers = {
+      "Content-Type": "application/json",
+      "Content-Length": Buffer.byteLength(payload),
+      "x-api-key": process.env.ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01"
+    };
+
+    const result = await new Promise((resolve, reject) => {
+      const options = { hostname: "api.anthropic.com", path: "/v1/messages", method: "POST", headers };
+      const req2 = https.request(options, r => {
+        let raw = "";
+        r.on("data", c => raw += c);
+        r.on("end", () => {
+          try {
+            const parsed = JSON.parse(raw);
+            if (parsed.error) return reject(new Error(parsed.error.message));
+            const text = (parsed.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
+            const cleaned = text.replace(/```json|```/g, "").trim();
+            resolve(JSON.parse(cleaned));
+          } catch(e) { reject(new Error("Parse error: " + e.message)); }
+        });
+      });
+      req2.on("error", reject);
+      req2.write(payload);
+      req2.end();
+    });
+
+    console.log("Markets result generated");
+    res.json(result);
+  } catch(e) {
+    console.error("Markets error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get("/health", function(req, res) {
   res.json({ status: "ok", apiKeySet: !!process.env.ANTHROPIC_API_KEY });
 });
