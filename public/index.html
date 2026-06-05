@@ -183,8 +183,8 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
   <!-- date nav -->
   <div class="date-nav">
     <button class="dnbtn active" id="btnToday" onclick="switchToToday()">TODAY</button>
-    <button class="dnbtn" id="btnHist" onclick="switchToHistory()">HISTORY</button>
     <button class="dnbtn" id="btnMarkets" onclick="switchToMarkets()">MARKETS</button>
+    <button class="dnbtn" id="btnHist" onclick="switchToHistory()">HISTORY</button>
     <input type="date" id="datePicker" style="display:none;" onchange="loadDate(this.value)"/>
     <span class="mode-badge mode-live" id="modeBadge">LIVE</span>
   </div>
@@ -720,7 +720,7 @@ function renderMarketCard(ticker, data) {
     var dirClass = isLong ? 'long' : 'short';
     bestBanner = '<div class="best-setup-banner">' +
       '<span class="best-setup-star">★</span>' +
-      '<span class="best-setup-label">Best Setup:</span>' +
+      '<span class="best-setup-label">Highest Probability:</span>' +
       '<span class="best-setup-direction '+dirClass+'">' + dir + '</span>' +
       '<span class="best-setup-arrow best-setup-direction '+dirClass+'">' + arrow + '</span>' +
     '</div>';
