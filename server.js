@@ -297,6 +297,7 @@ function callClaude(prompt, data, useWebSearch) {
     const body = {
       model: useWebSearch ? "claude-sonnet-4-6" : "claude-haiku-4-5-20251001",
       max_tokens: 500,
+      temperature: 0,
       // ── MODIFIED: added "guidance" field to the JSON schema description ──
       system: "You are a futures trader morning briefing assistant. Today is " + today + ". CRITICAL: Reply ONLY with raw JSON, no markdown, no backticks, no explanation. Format: {\"signal\":\"bull\",\"summary\":\"2 sentence summary\",\"score\":1,\"guidance\":null} where signal is bull/bear/neutral, score is 1/-1/0, and guidance is a one-sentence forward guidance note (for earnings topics only) or null if not applicable.",
       messages: [{ role: "user", content: prompt + (data && data !== "NO EXTERNAL DATA" ? "\n\nDATA:\n" + data : "") }]
@@ -573,6 +574,7 @@ app.post("/api/meta-score", async function(req, res) {
     const body = {
       model: "claude-haiku-4-5-20251001",
       max_tokens: 400,
+      temperature: 0,
       system: "You are a futures trader bias engine. CRITICAL: Reply ONLY with raw JSON, no markdown, no backticks, no explanation.",
       messages: [{ role: "user", content: META_PROMPT + "\n\nDATA:\n" + cardSummary }]
     };
@@ -730,6 +732,7 @@ app.post("/api/markets", async function(req, res) {
     const body = {
       model: "claude-haiku-4-5-20251001",
       max_tokens: 1200,
+      temperature: 0,
       system: "You are a futures trader market implications engine. CRITICAL: Reply ONLY with raw JSON matching the exact schema requested. No markdown, no backticks, no explanation.",
       messages: [{ role: "user", content: MARKETS_PROMPT + "\n\nDATA:\n" + context }]
     };
