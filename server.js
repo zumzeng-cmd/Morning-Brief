@@ -672,36 +672,159 @@ app.get("/api/history/:dateKey", function(req, res) {
 
 
 // ── Markets implications endpoint ────────────────────────────
+// NOTE: Claude only returns implication text and keyLevel.
+// All bias, bestSetup, and setupDirection are calculated server-side
+// using deterministic rules — Claude never decides instrument direction.
 const MARKETS_PROMPT = [
-  "You are a senior futures trader. Based on the morning brief signals below, provide specific trading implications for each of the following instruments.",
-  "INSTRUMENTS TO COVER:",
-  "EQUITIES: ES (S&P 500 futures), NQ (Nasdaq 100 futures), YM (Dow futures), RTY (Russell 2000 futures).",
-  "METALS: GC (Gold futures), SI (Silver futures), HG (Copper futures), PL (Platinum futures).",
-  "ENERGIES: CL (Crude Oil futures), NG (Natural Gas futures).",
-  "DOLLAR INDEX: DXY.",
-  "FOR EACH INSTRUMENT provide:",
-  "1. bias: bull, bear, or neutral",
-  "2. implication: ONE specific sentence on what the current signals mean for this instrument today. Be specific — mention actual drivers (yields, risk-off, dollar strength, growth fears etc). No generic statements.",
-  "3. keyLevel: one key level or price zone to watch today if known, or null if not applicable.",
-  "4. divergence: true if this instrument is moving differently from what the overall bias would suggest, false otherwise.",
-  "5. bestSetup: true or false. For each sector group (equities, metals, energies), set bestSetup: true on EXACTLY ONE instrument — the one with the clearest directional conviction, strongest catalyst alignment, and best risk/reward today. Set false on all others in that group. DXY always gets bestSetup: true since it is the only instrument in its group.",
-  "6. setupDirection: if bestSetup is true, set this to either LONG or SHORT based on the bias. If bestSetup is false, set to null.",
-  "BEST SETUP SELECTION RULES: Choose the instrument where (a) the bias is clearly bull or bear (not neutral), (b) there is a specific named catalyst driving it today, (c) it aligns with the overall market bias rather than diverging from it, (d) it has a key level to define risk. If all instruments in a group are neutral, pick the one with the most potential for a move. Never pick a neutral instrument if a directional one exists in the group.",
-  "INSTRUMENT-SPECIFIC RULES:",
-  "ES/NQ/YM/RTY: Score from econ + earnings + news weighted by their dynamic weights. NQ is most sensitive to yields and tech. RTY is most sensitive to rate expectations and small-cap risk. YM is least tech-sensitive. If yields rising sharply, NQ bear > ES bear > YM bear.",
-  "GC (Gold): Bull if risk-off OR dollar weakening OR inflation fears. Bear if dollar strengthening AND risk-on. Neutral if mixed. Rising yields without dollar strength = gold neutral to mildly bear.",
-  "SI (Silver): Follows gold but amplified. Also sensitive to industrial demand (copper signal).",
-  "HG (Copper): Bull if global growth optimism and risk-on. Bear if growth fears, strong dollar, risk-off. China/Asia market performance from pre-market is key input.",
-  "PL (Platinum): Follows gold/silver direction but less correlated. Industrial + precious metal hybrid.",
-  "CL (Crude Oil): Bull if risk-on, weak dollar, Middle East tension. Bear if strong dollar, demand fears, risk-off. News card is primary input.",
-  "NG (Natural Gas): Least correlated to macro — driven by weather/storage. Score neutral unless news card has specific NG catalyst.",
-  "DXY: Bull if strong econ data (NFP beat, CPI hot) AND risk-off. Bear if risk-on AND weak data. Note: DXY and gold often inverse. Rising yields typically strengthen DXY.",
+  "You are a senior futures trader. Based on the morning brief signals below, write ONE specific implication sentence and ONE key level for each instrument.",
+  "INSTRUMENTS: ES, NQ, YM, RTY (equities), GC, SI, HG, PL (metals), CL, NG (energies), DXY.",
+  "FOR EACH INSTRUMENT provide ONLY:",
+  "1. implication: ONE sentence on what today's specific drivers mean for this instrument. Name the actual catalyst (e.g. yield spike, risk-off, dollar strength, Asia weakness). Be precise, not generic.",
+  "2. keyLevel: the single most important price level or zone to watch today, as a string (e.g. '5250' or '19200-19400'). Null if genuinely unknown.",
+  "DO NOT include bias, signal, bestSetup, setupDirection, or divergence — the server calculates these.",
   "RETURN a JSON object with this exact structure:",
-  "{ \"equities\": { \"ES\": {\"bias\":\"bull\",\"implication\":\"..\",\"keyLevel\":\"5250\",\"divergence\":false,\"bestSetup\":false,\"setupDirection\":null}, \"NQ\":{...}, \"YM\":{...}, \"RTY\":{...} },",
-  "\"metals\": { \"GC\":{...}, \"SI\":{...}, \"HG\":{...}, \"PL\":{...} },",
-  "\"energies\": { \"CL\":{...}, \"NG\":{...} },",
-  "\"dxy\": { \"DXY\":{\"bias\":\"bull\",\"implication\":\"..\",\"keyLevel\":\"103.5\",\"divergence\":false,\"bestSetup\":true,\"setupDirection\":\"LONG\"} } }"
+  "{ \"equities\": { \"ES\": {\"implication\":\"..\",\"keyLevel\":\"5250\"}, \"NQ\":{\"implication\":\"..\",\"keyLevel\":\"19200\"}, \"YM\":{\"implication\":\"..\",\"keyLevel\":\"38500\"}, \"RTY\":{\"implication\":\"..\",\"keyLevel\":\"2010\"} },",
+  "\"metals\": { \"GC\":{\"implication\":\"..\",\"keyLevel\":\"2340\"}, \"SI\":{\"implication\":\"..\",\"keyLevel\":\"29.50\"}, \"HG\":{\"implication\":\"..\",\"keyLevel\":\"4.15\"}, \"PL\":{\"implication\":\"..\",\"keyLevel\":\"1050\"} },",
+  "\"energies\": { \"CL\":{\"implication\":\"..\",\"keyLevel\":\"78.50\"}, \"NG\":{\"implication\":\"..\",\"keyLevel\":null} },",
+  "\"dxy\": { \"DXY\":{\"implication\":\"..\",\"keyLevel\":\"104.50\"} } }"
 ].join(" ");
+
+// ── Deterministic instrument scoring ─────────────────────────
+// Derives all instrument bias/bestSetup/direction from card signals.
+// Never relies on Claude for directional decisions.
+function scoreInstruments(econ, earn, premarket, news, metaScore) {
+  const econSig    = econ      ? econ.signal      : "neutral";
+  const newsSig    = news      ? news.signal      : "neutral";
+  const preSig     = premarket ? premarket.signal : "neutral";
+  const econScore  = econ      ? parseFloat(econ.score)      || 0 : 0;
+  const newsScore  = news      ? parseFloat(news.score)      || 0 : 0;
+  const preScore   = premarket ? parseFloat(premarket.score) || 0 : 0;
+  const earnScore  = earn      ? parseFloat(earn.score)      || 0 : 0;
+  const overallWS  = metaScore ? parseFloat(metaScore.weightedScore) || 0 : 0;
+
+  // ── Derived market conditions ──
+  // Dollar: strong if econ bull AND (news neutral or bull). Weak if econ bear or news bull.
+  const dollarStrong = (econSig === "bull") && (newsSig !== "bull");
+  const dollarWeak   = (econSig === "bear") || (newsSig === "bull" && econSig !== "bull");
+
+  // Risk-off: equities selling off — news bear or premarket bear
+  const riskOff = (newsSig === "bear") || (preSig === "bear");
+  const riskOn  = (newsSig === "bull") && (preSig !== "bear");
+
+  // Yields rising: econ bull + news bear (market pricing higher-for-longer)
+  const yieldsRising = (econSig === "bull") && (newsSig === "bear");
+  const yieldsFalling= (econSig === "bear") && (newsSig === "bull");
+
+  // Asia weakness: premarket bear
+  const asiaWeak = preSig === "bear";
+  const asiaStrong = preSig === "bull";
+
+  // Growth fears: premarket bear + news bear
+  const growthFears = (preSig === "bear") && (newsSig === "bear");
+
+  function sig(s) { return s > 0 ? "bull" : s < 0 ? "bear" : "neutral"; }
+
+  // ── EQUITIES ──
+  // Blend econ + news + earn, yield-sensitivity per instrument
+  const esScore  = (econScore * 0.35) + (newsScore * 0.45) + (earnScore * 0.20);
+  const nqScore  = yieldsRising
+    ? Math.min(esScore - 0.15, newsScore * 0.6 + econScore * 0.25 + earnScore * 0.15)
+    : (econScore * 0.30) + (newsScore * 0.50) + (earnScore * 0.20);
+  const ymScore  = (econScore * 0.45) + (newsScore * 0.35) + (earnScore * 0.20);
+  const rtyScore = (econScore * 0.25) + (newsScore * 0.45) + (preScore * 0.10) + (earnScore * 0.20)
+                   + (yieldsRising ? -0.20 : 0);
+
+  const equityBias = { ES: sig(esScore), NQ: sig(nqScore), YM: sig(ymScore), RTY: sig(rtyScore) };
+
+  // ── METALS ──
+  // GC: conflicting (risk-off + strong dollar) = neutral
+  let gcBias;
+  if (riskOff && dollarStrong) gcBias = "neutral";
+  else if (riskOff || dollarWeak || yieldsFalling) gcBias = "bull";
+  else if (riskOn && dollarStrong && yieldsRising) gcBias = "bear";
+  else gcBias = "neutral";
+
+  // SI: follows GC but shifts toward bear if growth fears (industrial demand)
+  let siBias;
+  if (gcBias === "neutral" && growthFears) siBias = "bear";
+  else if (gcBias === "bull" && !growthFears) siBias = "bull";
+  else if (gcBias === "bear" || growthFears) siBias = "bear";
+  else siBias = gcBias;
+
+  // HG: growth fears / Asia weakness = bear, global growth = bull
+  let hgBias;
+  if (growthFears || asiaWeak) hgBias = "bear";
+  else if (riskOn && asiaStrong) hgBias = "bull";
+  else hgBias = "neutral";
+
+  // PL: 60% metals complex (GC/SI), 40% industrial (HG)
+  const plMetals = gcBias === "bull" ? 1 : gcBias === "bear" ? -1 : 0;
+  const plIndust = hgBias === "bull" ? 1 : hgBias === "bear" ? -1 : 0;
+  const plScore  = (plMetals * 0.6) + (plIndust * 0.4);
+  const plBias   = sig(plScore);
+
+  // ── ENERGIES ──
+  // CL: risk-off + strong dollar = bear; risk-on + weak dollar = bull
+  let clBias;
+  if (riskOff && dollarStrong) clBias = "bear";
+  else if (riskOn && dollarWeak) clBias = "bull";
+  else if (riskOff || dollarStrong) clBias = "bear";
+  else clBias = "neutral";
+
+  // NG: macro-independent, always neutral unless news has NG catalyst
+  // (NG-specific news detection is too unreliable to automate — default neutral)
+  const ngBias = "neutral";
+
+  // ── DXY ──
+  // Strong econ + risk-off (flight to safety + rate premium) = bull
+  // Weak econ or risk-on = bear
+  let dxyBias;
+  if (econSig === "bull" && riskOff) dxyBias = "bull";
+  else if (econSig === "bull" && !riskOn) dxyBias = "bull";
+  else if (econSig === "bear" || riskOn) dxyBias = "bear";
+  else dxyBias = "neutral";
+
+  // ── BEST SETUP per group ──
+  // Pick clearest directional (not neutral) + aligns with overall bias signal
+  function pickBest(instruments, biases) {
+    // Prefer instruments that match overall direction, then strongest signal
+    const overall = overallWS < 0 ? "bear" : overallWS > 0 ? "bull" : null;
+    const directional = instruments.filter(t => biases[t] !== "neutral");
+    const aligned = directional.filter(t => !overall || biases[t] === overall);
+    const pool = aligned.length > 0 ? aligned : directional.length > 0 ? directional : instruments;
+    // Return first in pool — order of array = priority
+    return pool[0];
+  }
+
+  const equityBest = pickBest(["NQ","ES","RTY","YM"], equityBias);
+  const metalsBest = pickBest(["HG","GC","SI","PL"], { GC: gcBias, SI: siBias, HG: hgBias, PL: plBias });
+  const energyBest = pickBest(["CL","NG"], { CL: clBias, NG: ngBias });
+
+  function setupDir(b) { return b === "bull" ? "LONG" : b === "bear" ? "SHORT" : null; }
+  function diverges(b) { return overallWS < -0.15 ? b === "bull" : overallWS > 0.15 ? b === "bear" : false; }
+
+  return {
+    equities: {
+      ES:  { bias: equityBias.ES,  bestSetup: equityBest==="ES",  setupDirection: equityBest==="ES"  ? setupDir(equityBias.ES)  : null, divergence: diverges(equityBias.ES)  },
+      NQ:  { bias: equityBias.NQ,  bestSetup: equityBest==="NQ",  setupDirection: equityBest==="NQ"  ? setupDir(equityBias.NQ)  : null, divergence: diverges(equityBias.NQ)  },
+      YM:  { bias: equityBias.YM,  bestSetup: equityBest==="YM",  setupDirection: equityBest==="YM"  ? setupDir(equityBias.YM)  : null, divergence: diverges(equityBias.YM)  },
+      RTY: { bias: equityBias.RTY, bestSetup: equityBest==="RTY", setupDirection: equityBest==="RTY" ? setupDir(equityBias.RTY) : null, divergence: diverges(equityBias.RTY) },
+    },
+    metals: {
+      GC: { bias: gcBias, bestSetup: metalsBest==="GC", setupDirection: metalsBest==="GC" ? setupDir(gcBias) : null, divergence: diverges(gcBias) },
+      SI: { bias: siBias, bestSetup: metalsBest==="SI", setupDirection: metalsBest==="SI" ? setupDir(siBias) : null, divergence: diverges(siBias) },
+      HG: { bias: hgBias, bestSetup: metalsBest==="HG", setupDirection: metalsBest==="HG" ? setupDir(hgBias) : null, divergence: diverges(hgBias) },
+      PL: { bias: plBias, bestSetup: metalsBest==="PL", setupDirection: metalsBest==="PL" ? setupDir(plBias) : null, divergence: diverges(plBias) },
+    },
+    energies: {
+      CL: { bias: clBias, bestSetup: energyBest==="CL", setupDirection: energyBest==="CL" ? setupDir(clBias) : null, divergence: diverges(clBias) },
+      NG: { bias: ngBias, bestSetup: energyBest==="NG", setupDirection: energyBest==="NG" ? setupDir(ngBias) : null, divergence: diverges(ngBias) },
+    },
+    dxy: {
+      DXY: { bias: dxyBias, bestSetup: true, setupDirection: setupDir(dxyBias), divergence: false },
+    }
+  };
+}
 
 app.post("/api/markets", async function(req, res) {
   const { econ, earn, premarket, news, metaScore } = req.body;
@@ -766,8 +889,35 @@ app.post("/api/markets", async function(req, res) {
       req2.end();
     });
 
-    console.log("Markets result generated");
-    res.json(result);
+    // ── Merge Claude's text with server-side deterministic scores ──
+    const scores = scoreInstruments(econ, earn, premarket, news, metaScore);
+
+    function merge(claudeGroup, scoreGroup) {
+      const out = {};
+      Object.keys(scoreGroup).forEach(ticker => {
+        const c = (claudeGroup && claudeGroup[ticker]) ? claudeGroup[ticker] : {};
+        const s = scoreGroup[ticker];
+        out[ticker] = {
+          bias:           s.bias,
+          implication:    c.implication || "No implication data.",
+          keyLevel:       c.keyLevel    || null,
+          divergence:     s.divergence,
+          bestSetup:      s.bestSetup,
+          setupDirection: s.setupDirection
+        };
+      });
+      return out;
+    }
+
+    const finalMarkets = {
+      equities: merge(result.equities, scores.equities),
+      metals:   merge(result.metals,   scores.metals),
+      energies: merge(result.energies, scores.energies),
+      dxy:      merge(result.dxy,      scores.dxy)
+    };
+
+    console.log("Markets result generated (deterministic scoring applied)");
+    res.json(finalMarkets);
   } catch(e) {
     console.error("Markets error:", e.message);
     res.status(500).json({ error: e.message });
