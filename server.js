@@ -545,14 +545,10 @@ const META_PROMPT = [
   "DYNAMIC RULES: On NFP/CPI/FOMC days, econ starts at weight 5 and pre-market gets weight 1 (pre-market just reflects the same data). On mega-cap earnings days with no macro, earnings gets 5. Pre-market max weight is 2 on days with major macro catalysts. News max weight is 4 (never 5 unless MARKET_SHOCK_OVERRIDE).",
   "MARKET REACTION RULE (CRITICAL): The market's actual price reaction always takes precedence over the raw data beat or miss. If econ is bullish (data beat) BUT news is bearish (market is selling the news — e.g. yields spiking, equities falling), this means the market is REJECTING the bullish interpretation. In this case: REDUCE econ weight by 2 (min 2) and INCREASE news weight by 2 (max 4). The news card captures real-time price action; when it contradicts econ, it wins. Example: NFP beats big (econ=bull) but 10yr yield spikes above 4.5% and NQ sells off (news=bear) = econ weight drops from 5 to 3, news weight rises from 2 to 4.",
   "CONTRADICTION RULE: If pre-market and news both contradict econ, treat that as strong confirmation that the market is not trading the data bullishly. In this scenario econ weight max is 3.",
-  "BIAS LABELS: weightedScore >= 0.6 = MILDLY BULLISH. >= 1.2 = BULLISH. >= 2.0 = STRONGLY BULLISH. <= -0.6 = MILDLY BEARISH. <= -1.2 = BEARISH. <= -2.0 = STRONGLY BEARISH. Between -0.6 and 0.6 = MIXED / NEUTRAL.",
-  "FINAL BIAS: Calculate weighted_score = sum(score * weight) for each card. Divide by sum(weights). Signal: weighted_score >= 0.5 = bull, <= -0.5 = bear, else neutral.",
   "RATIONALE: One sentence explaining what is driving the market today, whether the market is trading the data or rejecting it, and why you weighted things the way you did.",
+  "YOUR ONLY JOB IS TO RETURN WEIGHTS AND RATIONALE. Do not calculate scores or bias labels — the server will handle all math deterministically.",
   "JSON SCHEMA: {",
   "  \"weights\": {\"econ\":3,\"earn\":1,\"premarket\":1,\"news\":2},",
-  "  \"weightedScore\": 0.5,",
-  "  \"signal\": \"bull|bear|neutral\",",
-  "  \"biasLabel\": \"MILDLY BULLISH\",",
   "  \"rationale\": \"One sentence explaining today's dominant driver.\"",
   "}"
 ].join(" ");
@@ -609,11 +605,44 @@ app.post("/api/meta-score", async function(req, res) {
       req2.end();
     });
 
-    console.log("Meta-score result:", JSON.stringify(result));
-    res.json(result);
+    // ── Server-side deterministic scoring — never trust Claude's math ──
+    const weights = result.weights || { econ: 3, earn: 2, premarket: 1, news: 2 };
+
+    // Get scores from request body
+    const cardScores = {
+      econ:      econ      ? (parseFloat(econ.score)      || 0) : 0,
+      earn:      earn      ? (parseFloat(earn.score)      || 0) : 0,
+      premarket: premarket ? (parseFloat(premarket.score) || 0) : 0,
+      news:      news      ? (parseFloat(news.score)      || 0) : 0
+    };
+
+    // Weighted score: sum(score * weight) / sum(weights)
+    const totalWeight = Object.keys(weights).reduce((s, k) => s + (weights[k] || 0), 0);
+    const rawWeighted = Object.keys(weights).reduce((s, k) => s + (cardScores[k] || 0) * (weights[k] || 0), 0);
+    const weightedScore = totalWeight > 0 ? parseFloat((rawWeighted / totalWeight).toFixed(2)) : 0;
+
+    // Deterministic bias label from exact thresholds
+    let signal, biasLabel;
+    if      (weightedScore >=  2.0) { signal = "bull";    biasLabel = "STRONGLY BULLISH"; }
+    else if (weightedScore >=  1.2) { signal = "bull";    biasLabel = "BULLISH"; }
+    else if (weightedScore >=  0.6) { signal = "bull";    biasLabel = "MILDLY BULLISH"; }
+    else if (weightedScore >  -0.6) { signal = "neutral"; biasLabel = "MIXED / NEUTRAL"; }
+    else if (weightedScore >  -1.2) { signal = "bear";    biasLabel = "MILDLY BEARISH"; }
+    else if (weightedScore >  -2.0) { signal = "bear";    biasLabel = "BEARISH"; }
+    else                            { signal = "bear";    biasLabel = "STRONGLY BEARISH"; }
+
+    const finalResult = {
+      weights,
+      weightedScore,
+      signal,
+      biasLabel,
+      rationale: result.rationale || ""
+    };
+
+    console.log("Meta-score result:", JSON.stringify(finalResult));
+    res.json(finalResult);
   } catch(e) {
     console.error("Meta-score error:", e.message);
-    // Fallback: return equal weights if meta-score fails
     res.status(500).json({ error: e.message });
   }
 });
