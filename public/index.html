@@ -180,7 +180,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
     </div></div>
   </div>
 
-  <button class="run-btn" id="runBtn" onclick="runAll()">&#9654; RUN MORNING ANALYSIS</button>
+  <button class="run-btn" id="runBtn" onclick="runAll()">▶ RUN MORNING ANALYSIS</button>
   <div class="footer-note" id="footerNote">Powered by Claude AI · Live data from FMP, Finnhub &amp; CNBC</div>
 
   <!-- history -->
@@ -409,7 +409,7 @@ async function runAll(){
   running=true;
   window.marketShockActive=false;
   const btn=document.getElementById('runBtn');
-  btn.disabled=true;btn.textContent='&#8987; ANALYZING...';
+  btn.disabled=true;btn.textContent='⧖ ANALYZING...';
   document.getElementById('footerNote').textContent='Fetching live data from FMP, Finnhub & CNBC...';
   const keys=['econ','earn','premarket','news'];
   keys.forEach(k=>setCardLoading(k));
@@ -427,7 +427,7 @@ async function runAll(){
   }
   await saveSnapshot(results);
   running=false;
-  btn.disabled=false;btn.textContent='&#8635; REFRESH ANALYSIS';
+  btn.disabled=false;btn.textContent='↺ REFRESH ANALYSIS';
   document.getElementById('footerNote').textContent='Last run: '+new Date().toLocaleTimeString()+' · Auto-saved to history';
 }
 
