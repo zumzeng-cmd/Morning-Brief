@@ -128,15 +128,6 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
     </div>
   </div>
 
-  <!-- master summary -->
-  <div id="summaryBox" style="display:none;background:linear-gradient(135deg,#0d1f0d,#0a1a1a);border:1px solid var(--green);border-radius:6px;padding:1rem 1.2rem;margin-bottom:1rem;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem;">
-      <span style="font-size:10px;font-weight:700;letter-spacing:.12em;color:var(--green);text-transform:uppercase;">📋 Morning Brief Summary</span>
-      <span style="font-size:10px;color:var(--muted);" id="summaryTime"></span>
-    </div>
-    <div style="font-family:'Courier New',monospace;font-size:12px;line-height:1.7;color:#e0e0e0;" id="summaryText">Generating summary...</div>
-  </div>
-
   <!-- cards -->
   <div class="grid">
     <div class="card" id="card-econ">
@@ -152,7 +143,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
     <div class="card" id="card-premarket">
       <div class="card-hdr"><span class="card-title">🌏 Pre-Market</span><span class="card-sig sig-neu" id="sig-premarket">NEUTRAL</span></div>
       <div class="card-body idle" id="body-premarket">Run analysis to check overnight markets...</div>
-      <div class="card-footer"><span class="card-pts pts-neu" id="pts-premarket">0.0</span><span class="card-weight">Weight: 2×</span></div>
+      <div class="card-footer"><span class="card-pts pts-neu" id="pts-premarket">0.0</span><span class="card-weight">Weight: 1×</span></div>
     </div>
     <div class="card" id="card-news">
       <div class="card-hdr"><span class="card-title">📰 Market News</span><span class="card-sig sig-neu" id="sig-news">NEUTRAL</span></div>
@@ -189,8 +180,8 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
     </div></div>
   </div>
 
-  <button class="run-btn" id="runBtn" onclick="runAll()">▶ RUN MORNING ANALYSIS</button>
-  <div class="footer-note" id="footerNote">Powered by Claude AI · Live data from ForexFactory, Nasdaq & CNBC</div>
+  <button class="run-btn" id="runBtn" onclick="runAll()">&#9654; RUN MORNING ANALYSIS</button>
+  <div class="footer-note" id="footerNote">Powered by Claude AI · Live data from FMP, Finnhub &amp; CNBC</div>
 
   <!-- history -->
   <div class="history-section">
@@ -200,13 +191,15 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 </div>
 
 <script>
-const WEIGHTS={econ:3,earn:2,premarket:2,news:2};
+// ── MODIFIED: premarket weight changed from 2 to 1 ──
+const WEIGHTS={econ:3,earn:2,premarket:1,news:2};
 const MAX=Object.values(WEIGHTS).reduce((a,b)=>a+b,0);
 let scores={econ:0,earn:0,premarket:0,news:0};
 let overrides={econ:null,earn:null,premarket:null,news:null};
 let running=false;
 let historyMode=false;
 let allHistory={};
+const BASE='';
 
 // clock
 function updateClock(){
@@ -244,7 +237,6 @@ function switchToHistory(){
   document.getElementById('runBtn').style.display='none';
   document.getElementById('overrideRow').style.opacity='0.3';
   document.getElementById('overrideRow').style.pointerEvents='none';
-  // set date picker to today
   document.getElementById('datePicker').value=todayKey();
 }
 
@@ -259,7 +251,6 @@ function loadDate(dateKey){
   }
   renderSnapshot(entry);
   document.getElementById('footerNote').textContent='Viewing saved analysis for '+dateKey;
-  // highlight in history list
   document.querySelectorAll('.history-item').forEach(el=>{
     el.classList.toggle('selected', el.dataset.key===dateKey);
   });
@@ -311,45 +302,34 @@ function setCardResult(key,result){
   const cleanSummary = result.summary ? result.summary.replace('MARKET_SHOCK_OVERRIDE','').replace('GEOPOLITICAL_OVERRIDE','').trim() : '';
 
   if(isShockNews){
-    // Store the override state globally
     window.marketShockActive = true;
-
-    // Discount all other card scores by 50%
     ['econ','earn','premarket'].forEach(function(k){
       scores[k] = scores[k] * 0.5;
     });
-
-    // Add warning banner to econ card
     const econBody = document.getElementById('body-econ');
     if(econBody && !econBody.dataset.shockWarning){
       econBody.dataset.shockWarning = '1';
-      econBody.innerHTML = '<div style="color:#FFB800;font-size:11px;margin-bottom:6px;border-left:2px solid #FFB800;padding-left:6px;">⚠️ MARKET SHOCK OVERRIDE — discounted 50%</div>' + econBody.textContent;
+      econBody.innerHTML = '<div style="color:#FFB800;font-size:11px;margin-bottom:6px;border-left:2px solid #FFB800;padding-left:6px;">&#9888;&#65039; MARKET SHOCK OVERRIDE — discounted 50%</div>' + econBody.textContent;
     }
-
-    // Add warning banner to earnings card
     const earnBody = document.getElementById('body-earn');
     if(earnBody && !earnBody.dataset.shockWarning){
       earnBody.dataset.shockWarning = '1';
-      earnBody.innerHTML = '<div style="color:#FFB800;font-size:11px;margin-bottom:6px;border-left:2px solid #FFB800;padding-left:6px;">⚠️ MARKET SHOCK OVERRIDE — discounted 50%</div>' + earnBody.textContent;
+      earnBody.innerHTML = '<div style="color:#FFB800;font-size:11px;margin-bottom:6px;border-left:2px solid #FFB800;padding-left:6px;">&#9888;&#65039; MARKET SHOCK OVERRIDE — discounted 50%</div>' + earnBody.textContent;
     }
-
-    // Add warning banner to premarket card
     const preMktBody = document.getElementById('body-premarket');
     if(preMktBody && !preMktBody.dataset.shockWarning){
       preMktBody.dataset.shockWarning = '1';
-      preMktBody.innerHTML = '<div style="color:#FFB800;font-size:11px;margin-bottom:6px;border-left:2px solid #FFB800;padding-left:6px;">⚠️ MARKET SHOCK OVERRIDE — discounted 50%</div>' + preMktBody.textContent;
+      preMktBody.innerHTML = '<div style="color:#FFB800;font-size:11px;margin-bottom:6px;border-left:2px solid #FFB800;padding-left:6px;">&#9888;&#65039; MARKET SHOCK OVERRIDE — discounted 50%</div>' + preMktBody.textContent;
     }
-
-    // Update sig badges on all other cards
     ['econ','earn','premarket'].forEach(function(k){
       const sigEl = document.getElementById('sig-'+k);
-      if(sigEl){ sigEl.textContent = '⚠️ OVERRIDDEN'; sigEl.className = 'card-sig'; sigEl.style.color='#FFB800'; sigEl.style.background='rgba(255,184,0,0.1)'; }
+      if(sigEl){ sigEl.textContent = '&#9888;&#65039; OVERRIDDEN'; sigEl.className = 'card-sig'; sigEl.style.color='#FFB800'; sigEl.style.background='rgba(255,184,0,0.1)'; }
     });
   }
 
   const pts = result.score * WEIGHTS[key];
   const ptsClass=pts>0?'pts-bull':pts<0?'pts-bear':'pts-neu';
-  document.getElementById('sig-'+key).textContent = isShockNews ? '⚠️ SHOCK TRIGGER' : sig;
+  document.getElementById('sig-'+key).textContent = isShockNews ? '&#9888;&#65039; SHOCK TRIGGER' : sig;
   document.getElementById('sig-'+key).className='card-sig '+(isShockNews?'sig-bear':sigClass);
   if(isShockNews){ document.getElementById('sig-'+key).style.background='rgba(255,68,68,0.2)'; document.getElementById('sig-'+key).style.color='#FF4444'; }
   document.getElementById('body-'+key).textContent = isShockNews ? cleanSummary : (result.summary||'');
@@ -398,7 +378,7 @@ function renderSnapshot(entry){
 }
 
 async function analyze(topic){
-  const res=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topic})});
+  const res=await fetch(BASE+'/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topic})});
   if(!res.ok) throw new Error('Server error '+res.status);
   return res.json();
 }
@@ -417,7 +397,7 @@ async function saveSnapshot(results){
     news:results.news||null
   };
   try{
-    await fetch('/api/history/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dateKey,snapshot})});
+    await fetch(BASE+'/api/history/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dateKey,snapshot})});
     allHistory[dateKey]=snapshot;
     renderHistoryList();
     console.log('Saved snapshot for',dateKey);
@@ -427,9 +407,10 @@ async function saveSnapshot(results){
 async function runAll(){
   if(running)return;
   running=true;
+  window.marketShockActive=false;
   const btn=document.getElementById('runBtn');
-  btn.disabled=true;btn.textContent='⟳ ANALYZING...';
-  document.getElementById('footerNote').textContent='Fetching live data from ForexFactory, Nasdaq & CNBC...';
+  btn.disabled=true;btn.textContent='&#8987; ANALYZING...';
+  document.getElementById('footerNote').textContent='Fetching live data from FMP, Finnhub & CNBC...';
   const keys=['econ','earn','premarket','news'];
   keys.forEach(k=>setCardLoading(k));
   const results={};
@@ -445,33 +426,8 @@ async function runAll(){
     await new Promise(r=>setTimeout(r,1500));
   }
   await saveSnapshot(results);
-
-  // Generate master summary from all 4 card results
-  try {
-    const summaryBox = document.getElementById('summaryBox');
-    const summaryText = document.getElementById('summaryText');
-    const summaryTime = document.getElementById('summaryTime');
-    summaryBox.style.display = 'block';
-    summaryText.textContent = 'Generating summary...';
-    const sumRes = await fetch(BASE + '/api/summary', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        econ: results.econ,
-        earnings: results.earn,
-        premarket: results.premarket,
-        news: results.news
-      })
-    });
-    const sumData = await sumRes.json();
-    summaryText.textContent = sumData.summary || 'Unable to generate summary.';
-    summaryTime.textContent = new Date().toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit' });
-  } catch(e) {
-    document.getElementById('summaryText').textContent = 'Summary unavailable.';
-  }
-
   running=false;
-  btn.disabled=false;btn.textContent='↺ REFRESH ANALYSIS';
+  btn.disabled=false;btn.textContent='&#8635; REFRESH ANALYSIS';
   document.getElementById('footerNote').textContent='Last run: '+new Date().toLocaleTimeString()+' · Auto-saved to history';
 }
 
@@ -487,7 +443,7 @@ function renderHistoryList(){
     const e=allHistory[k];
     const norm=e.norm||0;
     const color=norm>=2?'var(--bull)':norm<=-2?'#FF4444':'var(--accent2)';
-    return '<div class="history-item" data-key="'+k+'" onclick="loadDate(\''+k+'\')">' +
+    return '<div class="history-item" data-key="'+k+'" onclick="loadDate(''+k+'')">' +
       '<span class="hist-date">'+k+'</span>' +
       '<span class="hist-bias" style="color:'+color+'">'+e.bias+'</span>' +
       '<span class="hist-score" style="color:'+color+'">'+(norm>=0?'+':'')+norm.toFixed(1)+'</span>' +
@@ -497,7 +453,7 @@ function renderHistoryList(){
 
 async function loadHistory(){
   try{
-    const res=await fetch('/api/history');
+    const res=await fetch(BASE+'/api/history');
     allHistory=await res.json();
     renderHistoryList();
   }catch(e){console.error('History load error:',e);}
