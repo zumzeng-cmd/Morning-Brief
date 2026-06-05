@@ -177,7 +177,7 @@ async function fetchEarnings() {
     return tag + " " + tier + " " + r.symbol + " | EPS Act: " + epsAct + " vs Est: " + epsEst + " " + beat + rev + revEst + " | " + (r.hour || "");
   }
 
-  // FMP doesn't always have time-of-day (AMC/BMO) - include all yesterday + today rows
+  // FMP doesn't always have time-of-day (AMC/BMO) — include all yesterday + today rows
   // Yesterday rows = reported after yesterday close, moving today's market
   // Today rows = reporting today BMO or during market
   const seen = new Set();
@@ -214,7 +214,8 @@ function callClaude(prompt, data, useWebSearch) {
     const body = {
       model: useWebSearch ? "claude-sonnet-4-6" : "claude-haiku-4-5-20251001",
       max_tokens: 500,
-      system: "You are a futures trader morning briefing assistant. Today is " + today + ". CRITICAL: Reply ONLY with raw JSON, no markdown, no backticks, no explanation. Format: {\"signal\":\"bull\",\"summary\":\"2 sentence summary\",\"score\":1} where signal is bull/bear/neutral and score is 1/-1/0.",
+      // ── MODIFIED: added "guidance" field to the JSON schema description ──
+      system: "You are a futures trader morning briefing assistant. Today is " + today + ". CRITICAL: Reply ONLY with raw JSON, no markdown, no backticks, no explanation. Format: {\"signal\":\"bull\",\"summary\":\"2 sentence summary\",\"score\":1,\"guidance\":null} where signal is bull/bear/neutral, score is 1/-1/0, and guidance is a one-sentence forward guidance note (for earnings topics only) or null if not applicable.",
       messages: [{ role: "user", content: prompt + (data && data !== "NO EXTERNAL DATA" ? "\n\nDATA:\n" + data : "") }]
     };
     if (useWebSearch) body.tools = [{ type: "web_search_20250305", name: "web_search" }];
@@ -237,10 +238,12 @@ function callClaude(prompt, data, useWebSearch) {
           const text = (parsed.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
           const cleaned = text.replace(/```json|```/g, "").trim();
           const result = JSON.parse(cleaned);
-          // Ensure result has required fields - if Claude returned an error object, normalize it
+          // Ensure result has required fields — if Claude returned an error object, normalize it
           if (!result.signal || !result.hasOwnProperty("score")) {
-            resolve({ signal: "neutral", summary: "Could not fetch data. Use override buttons to set manually.", score: 0 });
+            resolve({ signal: "neutral", summary: "Could not fetch data. Use override buttons to set manually.", score: 0, guidance: null });
           } else {
+            // ── MODIFIED: ensure guidance key always exists (null if not returned) ──
+            if (!result.hasOwnProperty("guidance")) result.guidance = null;
             resolve(result);
           }
         } catch(e) { reject(new Error("Parse error: " + e.message)); }
@@ -258,23 +261,15 @@ const ECON_PROMPT = [
   "INCLUDE ONLY: Monetary policy (Fed rate decisions, FOMC, Fed speeches, ECB/BOE/BOJ), Labor market (NFP, JOLTS, Jobless Claims, ADP, Unemployment Rate, Average Hourly Earnings), Inflation (CPI, Core CPI, PPI, Core PPI, PCE, Core PCE), Growth (GDP), Sentiment & Manufacturing (ISM Manufacturing, ISM Services, PMI, Consumer Confidence, UoM Sentiment), Energy (EIA Crude Oil Inventories, EIA Natural Gas Storage), London metals session (Gold, Silver, Copper, Platinum London fix or LME), Any HIGH or MEDIUM impact USD event.",
   "EXCLUDE: Low impact events, non-USD data (except London metals).",
   "For each included report: name, actual vs forecast, beat or miss.",
-  "MARKET REGIME (2025-2026): Inflation has cooled but remains above target. Fed is on hold. We are in GOOD NEWS IS GOOD NEWS mode - strong economic data = bullish for equities. Only flip bearish if inflation re-accelerates sharply.",
+  "MARKET REGIME (2025-2026): Inflation has cooled but remains above target. Fed is on hold. We are in GOOD NEWS IS GOOD NEWS mode — strong economic data = bullish for equities. Only flip bearish if inflation re-accelerates sharply.",
   "TIER 1 (dominates everything): Fed rate decision, FOMC, NFP, CPI, PCE. TIER 2 (high weight): JOLTS, Jobless Claims, ADP, Unemployment Rate, PPI. TIER 3 (medium): GDP, ISM, PMI, Sentiment. TIER 4 (lower): Oil/gas inventories, metals.",
-  "JOBLESS CLAIMS RULE: Initial Jobless Claims HIGHER than forecast = BEARISH (more people unemployed = labor weakening). Claims LOWER than forecast = BULLISH (fewer unemployed = strong labor). This is the opposite of most indicators - a higher number is bad. 225K vs 213K forecast = MISS = BEARISH.",
+  "JOBLESS CLAIMS RULE: Initial Jobless Claims HIGHER than forecast = BEARISH (more people unemployed = labor weakening). Claims LOWER than forecast = BULLISH (fewer unemployed = strong labor). This is the opposite of most indicators — a higher number is bad. 225K vs 213K forecast = MISS = BEARISH.",
   "JOLTS RULE: JOLTS job openings HIGHER than forecast = BULLISH (more demand for workers). JOLTS lower = bearish.",
   "TODAY-ONLY RULE: Only score reports confirmed released or scheduled for TODAY. Strictly ignore any reports from yesterday or earlier.",
   "MEGA-CAP STRICT RULE: any miss is a miss regardless of size.",
-  "Score: bull=1, bear=-1, neutral=0."
-].join(" ");
-
-const SUMMARY_PROMPT = [
-  "You are a professional futures day trader writing a pre-market brief. Given the four scored inputs below, write a single cohesive morning summary.",
-  "FORMAT: Start with the overall bias in one sentence (e.g. 'Bias is MILDLY BEARISH heading into the open.'). Then 2-3 sentences explaining the primary drivers - what is actually moving the market today. End with one actionable sentence for NQ/ES futures trading.",
-  "TONE: Professional, direct, no fluff. Like a senior trader talking to a junior trader before the bell.",
-  "INCLUDE: The most important data points - specific numbers, company names, report names. Do not be vague.",
-  "DO NOT include: Level labels, score numbers, the word aggregate, or meta-commentary about the dashboard.",
-  "LENGTH: 4-6 sentences maximum.",
-  "CRITICAL: Reply ONLY with raw JSON format - {signal, summary, score} - where signal is bull/bear/neutral, summary is your 4-6 sentence plain text analysis, and score is -1 to 1."
+  "Score: bull=1, bear=-1, neutral=0.",
+  // ── MODIFIED: guidance is not applicable for econ, explicitly set null ──
+  "JSON SCHEMA: {\"signal\":\"bull|bear|neutral\",\"summary\":\"2 sentence summary\",\"score\":1,\"guidance\":null}"
 ].join(" ");
 
 const EARN_PROMPT = [
@@ -282,20 +277,26 @@ const EARN_PROMPT = [
   "MEGA-CAP INDEX HEAVYWEIGHTS (highest weight): NVDA, AAPL, MSFT, META, GOOGL, GOOG, AMZN, TSLA, AVGO, NFLX, AMD.",
   "LARGE-CAP HIGH IMPACT (significant weight): JPM, GS, BAC, MS, WFC, C, V, MA, UNH, LLY, JNJ, XOM, CVX, CRM, ORCL, ADBE, QCOM, MU, NOW.",
   "SMALL/MID CAP (low weight): Everything else.",
-  "DATA SOURCE: non-GAAP adjusted EPS - the correct basis vs analyst estimates.",
+  "DATA SOURCE: non-GAAP adjusted EPS — the correct basis vs analyst estimates.",
   "MEGA-CAP STRICT RULE: any miss is a miss regardless of size. Trust the BEAT/MISS/IN-LINE label in the data.",
-  "CRITICAL: Only score based on CONFIRMED actual EPS in the data. If all TBD, score 0 neutral - do NOT guess.",
+  "CRITICAL: Only score based on CONFIRMED actual EPS in the data. If all TBD, score 0 neutral — do NOT guess.",
   "IN-LINE RULE: IN-LINE for a mega-cap = neutral. Revenue beats/misses also factor in.",
   "FORWARD GUIDANCE RULE: For mega-caps, forward guidance is often MORE important than the EPS beat/miss. Strong guidance that beats consensus = add +0.5 to score. Weak or below-consensus guidance = subtract 0.5. Reaffirmed full-year targets = mild positive. If guidance is included in the data, factor it into your summary and score.",
   "SUMMARY RULE: For any mega-cap result, your summary must include: (1) EPS beat/miss, (2) revenue beat/miss, (3) forward guidance vs consensus if available, (4) any key metric like AI revenue, cloud growth, or segment performance that moves NQ/ES.",
-  "Score: bull=1, bear=-1, neutral=0. You may use 0.5 increments when guidance meaningfully changes the picture."
+  "Score: bull=1, bear=-1, neutral=0. You may use 0.5 increments when guidance meaningfully changes the picture.",
+  // ── MODIFIED: staleness rule to prevent old reports dominating ──
+  "STALENESS RULE: Reports tagged [YEST] are from yesterday's after-close. If the current time is past 10:00am ET, yesterday's reports have already been fully priced in by the market — note them briefly in your summary but set their score contribution to 0. Only score [YEST] reports if it is before 10:00am ET (i.e. the market has not yet had a full session to react). [TODAY] reports always score normally regardless of time.",
+  // ── MODIFIED: explicit JSON schema requiring guidance field ──
+  "JSON SCHEMA: {\"signal\":\"bull|bear|neutral\",\"summary\":\"2 sentence summary\",\"score\":1,\"guidance\":\"One sentence on forward guidance vs consensus — include specific numbers if available (e.g. Q3 revenue guided $X vs $Y consensus). Set to null only if absolutely no guidance data is present in the source material.\"}"
 ].join(" ");
 
 const PREMARKET_PROMPT = [
   "From this CNBC data extract Asia and Europe overnight market performance and US futures direction (NQ, ES, DOW, YM).",
   "Name specific index levels or % changes if visible.",
   "Score: bull if majority green, bear if majority red, neutral if mixed.",
-  "Score: bull=1, bear=-1, neutral=0."
+  "Score: bull=1, bear=-1, neutral=0.",
+  // ── MODIFIED: guidance is not applicable for premarket ──
+  "JSON SCHEMA: {\"signal\":\"bull|bear|neutral\",\"summary\":\"2 sentence summary\",\"score\":1,\"guidance\":null}"
 ].join(" ");
 
 const NEWS_PROMPT = [
@@ -306,7 +307,9 @@ const NEWS_PROMPT = [
   "LEVEL 2 - MEDIUM: Sector news, individual large-cap catalyst.",
   "LEVEL 1 - LOW (do not score): Routine analyst calls, minor company news.",
   "IMPORTANT: Do NOT include level labels like Level 3 or Level 4 in your summary text. Write natural plain English.",
-  "Score: bull=1, bear=-1, neutral=0."
+  "Score: bull=1, bear=-1, neutral=0.",
+  // ── MODIFIED: guidance is not applicable for news ──
+  "JSON SCHEMA: {\"signal\":\"bull|bear|neutral\",\"summary\":\"2 sentence summary\",\"score\":1,\"guidance\":null}"
 ].join(" ");
 
 // ── Make.com intake endpoint ──────────────────────────────────
@@ -332,7 +335,7 @@ app.get("/intake-status", function(req, res) {
   });
 });
 
-// Debug endpoint - shows first 500 chars of each data source
+// Debug endpoint — shows first 500 chars of each data source
 app.get("/intake-preview", function(req, res) {
   res.json({
     econ:      latestMakeData.econ      ? latestMakeData.econ.slice(0, 500)      : null,
@@ -383,11 +386,13 @@ app.post("/api/analyze", async function(req, res) {
         }
       }
     } else if (topic === "earn") {
-      prompt = EARN_PROMPT;
       const today3 = new Date();
       const todayStr3 = today3.toISOString().slice(0, 10);
       const yest3 = new Date(today3); yest3.setDate(yest3.getDate()-1);
       const yestStr3 = yest3.toISOString().slice(0, 10);
+      // Inject current ET time so the staleness rule fires correctly
+      const etTime = today3.toLocaleTimeString("en-US", { hour:"2-digit", minute:"2-digit", hour12:true, timeZone:"America/New_York" });
+      prompt = EARN_PROMPT + " CURRENT TIME (ET): " + etTime + ".";
       if (latestMakeData.earnings && latestMakeData.earnings.length > 50) {
         rawData = latestMakeData.earnings;
         console.log("Earnings: using Make.com data");
@@ -396,8 +401,8 @@ app.post("/api/analyze", async function(req, res) {
         // Check if FMP has mega-cap actual data
         const hasMegaActuals = rawData && (rawData.includes("BEAT") || rawData.includes("MISS") || rawData.includes("IN-LINE")) && (rawData.includes("AVGO") || rawData.includes("NVDA") || rawData.includes("AAPL") || rawData.includes("MSFT") || rawData.includes("META"));
         if (!hasMegaActuals) {
-          // Supplement with web search for recent mega-cap results
-          prompt = EARN_PROMPT + " Search the web for major S&P500/Nasdaq earnings reported on " + yestStr3 + " AMC or " + todayStr3 + " BMO. Focus on AVGO, NVDA, AAPL, MSFT, META, GOOGL, AMZN, TSLA, NFLX, AMD and major banks. For each company found state: EPS actual vs estimate (beat/miss), revenue actual vs estimate, AND forward guidance vs consensus - guidance often moves the stock more than EPS. Also include this API data: " + (rawData || "none");
+          // ── MODIFIED: web search prompt now explicitly asks for guidance data ──
+          prompt = EARN_PROMPT + " CURRENT TIME (ET): " + etTime + ". Search the web for major S&P500/Nasdaq earnings reported on " + yestStr3 + " AMC or " + todayStr3 + " BMO. Focus on AVGO, NVDA, AAPL, MSFT, META, GOOGL, AMZN, TSLA, NFLX, AMD and major banks. For each company found state: EPS actual vs estimate (beat/miss), revenue actual vs estimate, AND forward guidance vs consensus — include specific guided figures (e.g. Q3 revenue $X guided vs $Y consensus) as guidance often moves the stock more than EPS. Also include this API data: " + (rawData || "none");
           useSearch = true;
           console.log("Earnings: using web search for mega-cap results");
         }
@@ -419,39 +424,6 @@ app.post("/api/analyze", async function(req, res) {
     res.json(result);
   } catch(e) {
     console.error("Error for " + topic + ":", e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ── Summary endpoint ─────────────────────────────────────────
-app.post("/api/summary", async function(req, res) {
-  const { econ, earnings, premarket, news } = req.body || {};
-  if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ error: "API key not set" });
-
-  const today = new Date().toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
-  const econTxt = econ ? econ.signal.toUpperCase() + ": " + econ.summary : "No data";
-  const earnTxt = earnings ? earnings.signal.toUpperCase() + ": " + earnings.summary : "No data";
-  const preTxt = premarket ? premarket.signal.toUpperCase() + ": " + premarket.summary : "No data";
-  const newsTxt = news ? news.signal.toUpperCase() + ": " + news.summary : "No data";
-  const context = "ECON: " + econTxt + "\nEARNINGS: " + earnTxt + "\nPRE-MARKET: " + preTxt + "\nNEWS: " + newsTxt;
-
-
-  const userMsg = "Write a 4-6 sentence pre-market brief for a futures day trader. " +
-    "Start with the overall bias. Explain primary drivers with specific numbers and names. " +
-    "End with one actionable sentence for NQ/ES. Be direct and professional. " +
-    "Return ONLY raw JSON with signal, summary, and score fields. " +
-    "\n\nDATA:\n" + context;
-
-
-  try {
-    const result = await callClaude(userMsg, "", false);
-    if (result && result.summary) {
-      res.json({ summary: result.summary });
-    } else {
-      res.json({ summary: "Could not generate summary." });
-    }
-  } catch(e) {
-    console.error("Summary error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
