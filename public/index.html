@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Morning Brief — Futures Bias Engine</title>
+<title>Daily Market Profile — Futures Bias Engine</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Bebas+Neue&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;}
@@ -16,7 +16,7 @@
 body{background:var(--bg);color:var(--text);font-family:var(--font-mono);min-height:100vh;}
 body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);background-size:40px 40px;opacity:0.3;pointer-events:none;z-index:0;}
 .wrap{position:relative;z-index:1;padding:1.5rem;max-width:1100px;margin:0 auto;}
-.hdr{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:1.2rem;border-bottom:1px solid var(--border);padding-bottom:1rem;}
+.hdr{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:1.2rem;border-bottom:1px solid var(--border);padding-bottom:1rem;}
 .hdr-title{font-family:var(--font-display);font-size:42px;letter-spacing:2px;color:var(--accent);line-height:1;}
 .hdr-sub{font-size:11px;color:var(--muted);margin-top:4px;letter-spacing:0.1em;}
 .clock{font-family:var(--font-display);font-size:32px;color:var(--text);letter-spacing:2px;}
@@ -165,16 +165,18 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 .best-setup-direction.short { color: var(--bear); }
 .best-setup-arrow { font-size: 13px; }
 .market-card.best { border-color: rgba(255,184,0,0.5); box-shadow: 0 0 12px rgba(255,184,0,0.08); }
+
+
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="hdr">
     <div>
-      <div class="hdr-title">MORNING BRIEF</div>
+      <div class="hdr-title">DAILY MARKET PROFILE</div>
       <div class="hdr-sub">FUTURES TRADER · DAILY BIAS ENGINE</div>
     </div>
-    <div>
+    <div style="text-align:right;">
       <div class="clock" id="clock">--:--</div>
       <div class="date-txt" id="dateTxt">-- --- ----</div>
     </div>
@@ -184,9 +186,11 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
   <div class="date-nav">
     <button class="dnbtn active" id="btnToday" onclick="switchToToday()">TODAY</button>
     <button class="dnbtn" id="btnMarkets" onclick="switchToMarkets()">MARKETS</button>
-    <button class="dnbtn" id="btnHist" onclick="switchToHistory()">HISTORY</button>
-    <input type="date" id="datePicker" style="display:none;" onchange="loadDate(this.value)"/>
     <span class="mode-badge mode-live" id="modeBadge">LIVE</span>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+      <input type="date" id="datePicker" style="display:none;background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:11px;padding:4px 8px;border-radius:3px;outline:none;" onchange="loadDate(this.value)"/>
+      <button class="dnbtn" id="btnHist" onclick="switchToHistory()">HISTORY</button>
+    </div>
   </div>
 
   <!-- bias banner -->
@@ -320,6 +324,7 @@ function switchToToday(){
   document.getElementById('overrideRow').style.opacity='1';
   document.getElementById('overrideRow').style.pointerEvents='';
   // Show/hide panels only — never reset card data
+  document.getElementById('datePicker').style.display='none';
   document.getElementById('panelMarkets').style.display='none';
   document.querySelector('.grid').style.display='grid';
   document.querySelector('.history-section').style.display='block';
@@ -332,13 +337,12 @@ function switchToHistory(){
   document.getElementById('btnToday').classList.remove('active');
   document.getElementById('btnHist').classList.add('active');
   document.getElementById('btnMarkets').classList.remove('active');
-  document.getElementById('datePicker').style.display='';
+  document.getElementById('datePicker').style.display='inline-block';
   document.getElementById('modeBadge').textContent='HISTORY';
   document.getElementById('modeBadge').className='mode-badge mode-hist';
   document.getElementById('runBtn').style.display='none';
   document.getElementById('overrideRow').style.opacity='0.3';
   document.getElementById('overrideRow').style.pointerEvents='none';
-  // Show/hide panels only — never reset card data
   document.getElementById('panelMarkets').style.display='none';
   document.querySelector('.grid').style.display='grid';
   document.querySelector('.history-section').style.display='block';
@@ -357,6 +361,7 @@ function switchToMarkets(){
   document.getElementById('overrideRow').style.opacity='0.3';
   document.getElementById('overrideRow').style.pointerEvents='none';
   // Show markets panel, hide today grid — data is preserved
+  document.getElementById('datePicker').style.display='none';
   document.getElementById('panelMarkets').style.display='block';
   document.querySelector('.grid').style.display='none';
   document.querySelector('.history-section').style.display='none';
