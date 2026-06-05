@@ -145,6 +145,26 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 .markets-refresh-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); background: rgba(0,255,148,0.05); }
 .markets-refresh-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .markets-empty { font-size: 12px; color: var(--muted); font-style: italic; padding: 2rem 0; text-align: center; }
+
+.best-setup-banner {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 12px;
+  background: linear-gradient(90deg, rgba(255,184,0,0.10), rgba(255,184,0,0.04));
+  border-bottom: 1px solid rgba(255,184,0,0.2);
+}
+.best-setup-star { color: var(--accent2); font-size: 12px; }
+.best-setup-label {
+  font-size: 10px; font-weight: 500; letter-spacing: 0.12em;
+  color: var(--accent2); text-transform: uppercase;
+}
+.best-setup-direction {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.1em;
+  margin-left: 2px;
+}
+.best-setup-direction.long { color: var(--bull); }
+.best-setup-direction.short { color: var(--bear); }
+.best-setup-arrow { font-size: 13px; }
+.market-card.best { border-color: rgba(255,184,0,0.5); box-shadow: 0 0 12px rgba(255,184,0,0.08); }
 </style>
 </head>
 <body>
@@ -684,14 +704,32 @@ var MARKET_NAMES = {
 
 function renderMarketCard(ticker, data) {
   var bias = data.bias || 'neutral';
-  var borderClass = data.divergence ? 'diverge' : bias;
+  var isBest = data.bestSetup === true;
+  var borderClass = isBest ? 'best' : (data.divergence ? 'diverge' : bias);
   var sigClass = bias==='bull'?'sig-bull':bias==='bear'?'sig-bear':'sig-neu';
   var sigLabel = bias==='bull'?'BULLISH':bias==='bear'?'BEARISH':'NEUTRAL';
   var divergeBadge = data.divergence ? '<span class="diverge-badge">DIVERGING</span>' : '';
   var keyLevel = data.keyLevel ? '<div class="market-keylevel">Watch:<span>'+data.keyLevel+'</span></div>' : '<div class="market-keylevel"></div>';
+
+  // Best setup banner
+  var bestBanner = '';
+  if (isBest && data.setupDirection) {
+    var dir = data.setupDirection.toUpperCase();
+    var isLong = dir === 'LONG';
+    var arrow = isLong ? '↑' : '↓';
+    var dirClass = isLong ? 'long' : 'short';
+    bestBanner = '<div class="best-setup-banner">' +
+      '<span class="best-setup-star">★</span>' +
+      '<span class="best-setup-label">Best Setup:</span>' +
+      '<span class="best-setup-direction '+dirClass+'">' + dir + '</span>' +
+      '<span class="best-setup-arrow best-setup-direction '+dirClass+'">' + arrow + '</span>' +
+    '</div>';
+  }
+
   return '<div class="market-card '+borderClass+'">' +
+    bestBanner +
     '<div class="market-card-hdr">' +
-      '<div><div class="market-ticker '+bias+'">'+ticker+'</div><div class="market-name">'+( MARKET_NAMES[ticker]||'')+'</div></div>' +
+      '<div><div class="market-ticker '+bias+'">'+ticker+'</div><div class="market-name">'+(MARKET_NAMES[ticker]||'')+'</div></div>' +
       '<div style="display:flex;align-items:center;gap:6px;">'+divergeBadge+'<span class="market-sig '+sigClass+'">'+sigLabel+'</span></div>' +
     '</div>' +
     '<div class="market-body">'+(data.implication||'No data.')+'</div>' +
