@@ -895,7 +895,7 @@ const MARKETS_PROMPT = [
 // ── Deterministic instrument scoring ─────────────────────────
 // Derives all instrument bias/bestSetup/direction from card signals.
 // Never relies on Claude for directional decisions.
-function scoreInstruments(econ, earn, premarket, news, metaScore) {
+function scoreInstruments(econ, earn, premarket, news, metaScore, regime) {
   // ── Card signals (regime-adjusted) ──
   const econSig    = econ      ? econ.signal      : "neutral";
   const newsSig    = news      ? news.signal      : "neutral";
@@ -907,15 +907,14 @@ function scoreInstruments(econ, earn, premarket, news, metaScore) {
   const overallWS  = metaScore ? parseFloat(metaScore.weightedScore) || 0 : 0;
 
   // ── RAW econ direction — independent of regime flip ──
-  // The regime adjusts how econ scores affect equity bias, but for
-  // dollar/yield/macro condition detection we need the RAW data direction,
-  // not the regime-flipped signal. A strong NFP is still a strong NFP
-  // even if it's bearish for equities under GNISBN regime.
-  // We infer raw econ direction from the news/econ contradiction pattern.
-  const econDataStrong = (econSig === "bull") ||
-    (econSig === "bear" && regimeCache.econScoreFlip === true); // flipped bear = actually strong data
-  const econDataWeak   = (econSig === "bear" && !regimeCache.econScoreFlip) ||
-    (econSig === "bull" && regimeCache.econScoreFlip === true); // flipped bull = actually weak data
+  // Use the passed-in regime object (not module-level cache) to determine
+  // whether the econ signal was flipped. This ensures correctness even if
+  // the module cache differs from what was active when the analysis ran.
+  const econFlipped = regime && regime.econScoreFlip === true;
+  const econDataStrong = (econSig === "bull" && !econFlipped) ||
+    (econSig === "bear" && econFlipped);  // flipped bear = actually strong data
+  const econDataWeak   = (econSig === "bear" && !econFlipped) ||
+    (econSig === "bull" && econFlipped);  // flipped bull = actually weak data
 
   // ── Market conditions — derived from RAW data direction, not regime-adjusted signals ──
 
@@ -1060,7 +1059,7 @@ function scoreInstruments(econ, earn, premarket, news, metaScore) {
 }
 
 app.post("/api/markets", async function(req, res) {
-  const { econ, earn, premarket, news, metaScore } = req.body;
+  const { econ, earn, premarket, news, metaScore, regime } = req.body;
   if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ error: "API key not set" });
 
   try {
@@ -1123,7 +1122,8 @@ app.post("/api/markets", async function(req, res) {
     });
 
     // ── Merge Claude's text with server-side deterministic scores ──
-    const scores = scoreInstruments(econ, earn, premarket, news, metaScore);
+    const activeRegime = regime || regimeCache; // prefer frontend-sent regime, fall back to server cache
+    const scores = scoreInstruments(econ, earn, premarket, news, metaScore, activeRegime);
 
     function merge(claudeGroup, scoreGroup) {
       const out = {};
