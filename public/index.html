@@ -768,10 +768,43 @@ async function runAll(){
       await new Promise(r=>setTimeout(r,800));
     }
     await saveBacktestSnapshot(results, btDate);
-    // Show backtest mode label on cards
+
+    // ── Run meta-score on backtest results to normalize aggregate ──
+    var btRationaleBox = document.getElementById('rationaleBox');
+    var btRationaleText = document.getElementById('rationaleText');
+    if (btRationaleBox) { btRationaleBox.style.display='flex'; btRationaleText.textContent='Calculating dynamic weights...'; }
+    try {
+      var btMetaRes = await fetch(BASE + '/api/meta-score', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ econ: results.econ||null, earn: results.earn||null, premarket: results.premarket||null, news: results.news||null })
+      });
+      var btMeta = await btMetaRes.json();
+      if (btMeta && btMeta.weights) {
+        lastMetaScore = btMeta; WEIGHTS = btMeta.weights;
+        ['econ','earn','premarket','news'].forEach(function(k) {
+          var wtEl=document.getElementById('wt-'+k); var w=btMeta.weights[k]||1;
+          var stars=Array(w+1).join('★');
+          if(wtEl) wtEl.textContent='Weight: '+w+'×  '+stars;
+          var sc=scores[k]||0; var pts=sc*w; var ptsEl=document.getElementById('pts-'+k);
+          if(ptsEl){ ptsEl.textContent=(pts>=0?'+':'')+pts.toFixed(1); ptsEl.className='card-pts '+(pts>0?'pts-bull':pts<0?'pts-bear':'pts-neu'); }
+        });
+        var sig=(btMeta.signal||'neutral').toLowerCase();
+        var color=sig==='bull'?'#7AE89A':sig==='bear'?'#E87A7A':'var(--accent2)';
+        document.getElementById('biasValue').textContent=btMeta.biasLabel||'MIXED / NEUTRAL';
+        document.getElementById('biasValue').style.color=color;
+        var ws=parseFloat(btMeta.weightedScore)||0;
+        document.getElementById('aggScore').textContent=(ws>=0?'+':'')+ws.toFixed(1);
+        document.getElementById('aggScore').style.color=color;
+        var pct=((Math.max(-1,Math.min(1,ws))+1)/2*100).toFixed(1);
+        document.getElementById('scoreBar').style.width=pct+'%'; document.getElementById('scoreBar').style.background=color;
+        if(btRationaleText) btRationaleText.textContent=btMeta.rationale||'';
+      }
+    } catch(e) { console.error('Backtest meta-score error:', e); }
+
+    // Show backtest mode label
     document.getElementById('modeBadge').textContent = 'BACKTEST • ' + btDate;
     running=false; btn.disabled=false; btn.textContent='↺ RUN BACKTEST';
-    document.getElementById('footerNote').textContent = 'Backtest for ' + btDate + ' complete';
+    document.getElementById('footerNote').textContent = 'Backtest for ' + btDate + ' complete · Auto-saved';
     loadMarketsBackground();
     return;
   }
