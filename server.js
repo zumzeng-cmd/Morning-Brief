@@ -1019,12 +1019,14 @@ function scoreInstruments(econ, earn, premarket, news, metaScore, regime) {
   // Strong data = dollar bull (rate premium). Weak data = dollar bear.
   // Risk-off adds to dollar strength (flight to safety) but doesn't override data.
   let dxyBias;
-  if      (econDataStrong && riskOff)   dxyBias = "bull";  // data strength + safety bid
-  else if (econDataStrong)              dxyBias = "bull";  // data strength alone
-  else if (econDataWeak   && riskOn)    dxyBias = "bear";  // weak data + risk-on = dollar sold
-  else if (econDataWeak)                dxyBias = "bear";  // weak data
-  else if (riskOff)                     dxyBias = "neutral"; // safety bid but no data direction
-  else                                  dxyBias = "neutral";
+  if      (econDataStrong && riskOff)                              dxyBias = "bull";    // strong data + safety bid = dollar bid on all fronts
+  else if (econDataStrong)                                         dxyBias = "bull";    // strong data alone = rate premium drives dollar
+  else if (econIsNeutral && newsSig === "bear" && preSig === "bear") dxyBias = "bull";  // no new data but prior strong data still echoing through yields/risk-off
+  else if (econDataWeak   && riskOn)                               dxyBias = "bear";   // weak data + risk-on = dollar sold
+  else if (econDataWeak)                                           dxyBias = "bear";   // weak data = rate cut expectations = dollar weak
+  else if (econIsNeutral  && newsSig === "bull" && preSig === "bull") dxyBias = "bear"; // no data, risk-on = dollar pressure
+  else if (riskOff)                                                dxyBias = "neutral"; // safety bid but no data direction = no conviction
+  else                                                             dxyBias = "neutral";
 
   // ── BEST SETUP per group ──
   // Pick clearest directional (not neutral) + aligns with overall bias signal
