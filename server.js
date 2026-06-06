@@ -24,6 +24,15 @@ function saveHistory(h) {
 // ── Make.com data store ───────────────────────────────────────
 let latestMakeData = { econ: null, earnings: null, premarket: null, news: null, timestamp: null };
 
+// ── Regime cache — detected once per trading day, reused all day ──
+let regimeCache = { regime: null, rationale: null, dateKey: null };
+const REGIMES = {
+  GNISGN: "GOOD NEWS IS GOOD NEWS",
+  GNISBN: "GOOD NEWS IS BAD NEWS",
+  BNISBN: "BAD NEWS IS BAD NEWS",
+  BNISGNBN: "BAD NEWS IS GOOD NEWS"
+};
+
 // ── HTTP fetch ────────────────────────────────────────────────
 function fetchUrl(url, extraHeaders) {
   return new Promise((resolve, reject) => {
@@ -290,6 +299,179 @@ async function fetchNews() {
   return stripHtml(html, 2500);
 }
 
+
+// ── Regime detection prompt ───────────────────────────────────
+const REGIME_PROMPT = [
+  "You are a macro market analyst. Determine which of four market regimes is currently active for US equity index futures (NQ/ES).",
+  "THE FOUR REGIMES:",
+  "GNISGN (Good News Is Good News): Strong economic data = equities rally. Fed is easing or expected to cut. Growth optimism dominates. Market rewards beats. Typical in early-to-mid rate cut cycle or strong growth with low inflation.",
+  "GNISBN (Good News Is Bad News): Strong economic data = equities sell off. Fed is on hold or hiking. Market fears rate cuts being delayed/reversed. Yields spike on beats. Strong NFP/CPI = bearish for stocks. THIS WAS THE DOMINANT REGIME IN 2022-2023 and returns whenever inflation is above target and Fed is restrictive.",
+  "BNISBN (Bad News Is Bad News): Weak economic data = equities sell off. Recession fears dominate. Even Fed cut hopes don't offset growth collapse fears. Typical in deep recession or growth scare environments.",
+  "BNISGNBN (Bad News Is Good News): Weak economic data = equities rally. Fed pivot hopes drive stocks higher on weak prints. Typical when market is pricing aggressive rate cuts and inflation is no longer the primary concern.",
+  "DETECTION RULES — use ALL of the following signals:",
+  "1. Fed stance: Is Fed hiking, on hold, or cutting? On hold above 4% = likely GNISBN.",
+  "2. Inflation: Is CPI/PCE above 2.5% target? If yes, Fed constrained = likely GNISBN or BNISBN.",
+  "3. Recent data reactions: Did the last NFP/CPI beat cause equities to sell off? If yes = GNISBN.",
+  "4. Yield behavior: Do Treasury yields spike on strong data? If yes = GNISBN.",
+  "5. Growth outlook: Are recession fears elevated? If yes and inflation still high = BNISBN.",
+  "6. Market breadth: Is the market selling risk broadly or just rate-sensitives? Broad selloff on beats = GNISBN.",
+  "CURRENT MACRO CONTEXT (2025-2026): Fed has been on hold at restrictive rates. Inflation cooled from peak but remains above 2% target. Any strong labor or inflation data extends the higher-for-longer narrative. This strongly suggests GNISBN as the base regime unless you detect clear evidence of a pivot or inflation at/below target.",
+  "Use today's news and premarket data to confirm or override the base regime.",
+  "CONFIDENCE: Rate your confidence 1-5. If 4+, the regime is clear. If 3 or below, default to GNISBN for safety.",
+  "JSON SCHEMA: {\"regime\":\"GNISGN|GNISBN|BNISBN|BNISGNBN\",\"confidence\":4,\"rationale\":\"One sentence explaining why this regime is active today.\",\"econScoreFlip\":true}",
+  "econScoreFlip: true if strong econ data should score BEARISH (GNISBN or BNISBNBN), false if strong data scores BULLISH (GNISGN or BNISGNBN)."
+].join(" ");
+
+// ── Regime detection endpoint ─────────────────────────────────
+app.post("/api/regime", async function(req, res) {
+  if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ error: "API key not set" });
+  const todayKey = new Date().toISOString().slice(0, 10);
+
+  // Return cached regime if same day
+  if (regimeCache.regime && regimeCache.dateKey === todayKey) {
+    console.log("Regime: returning cached", regimeCache.regime);
+    return res.json(regimeCache);
+  }
+
+  try {
+    const { newsData, premarketData } = req.body;
+    const today = new Date().toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
+
+    const contextData = [
+      "TODAY: " + today,
+      "",
+      "NEWS/MARKET CONTEXT:",
+      newsData || "No news data provided.",
+      "",
+      "PRE-MARKET CONTEXT:",
+      premarketData || "No premarket data provided."
+    ].join("\n");
+
+    const body = {
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 300,
+      temperature: 0,
+      system: "You are a macro market regime analyst. CRITICAL: Reply ONLY with raw JSON, no markdown, no backticks, no explanation.",
+      messages: [{ role: "user", content: REGIME_PROMPT + "\n\nDATA:\n" + contextData }]
+    };
+
+    const payload = JSON.stringify(body);
+    const headers = {
+      "Content-Type": "application/json",
+      "Content-Length": Buffer.byteLength(payload),
+      "x-api-key": process.env.ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01"
+    };
+
+    const result = await new Promise((resolve, reject) => {
+      const options = { hostname: "api.anthropic.com", path: "/v1/messages", method: "POST", headers };
+      const req2 = https.request(options, r => {
+        let raw = "";
+        r.on("data", c => raw += c);
+        r.on("end", () => {
+          try {
+            const parsed = JSON.parse(raw);
+            if (parsed.error) return reject(new Error(parsed.error.message));
+            const text = (parsed.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
+            resolve(JSON.parse(text.replace(/```json|```/g, "").trim()));
+          } catch(e) { reject(new Error("Parse error: " + e.message)); }
+        });
+      });
+      req2.on("error", reject);
+      req2.write(payload);
+      req2.end();
+    });
+
+    // Validate regime value — reject invalid or low-confidence results
+    const validRegimes = ["GNISGN", "GNISBN", "BNISBN", "BNISGNBN"];
+    const confidence = parseInt(result.confidence) || 0;
+
+    if (!validRegimes.includes(result.regime) || confidence < 3) {
+      // Low confidence — retry once with web search via Sonnet for more context
+      console.log("Regime: low confidence (" + confidence + "), retrying with web search...");
+      throw new Error("LOW_CONFIDENCE:" + confidence);
+    }
+
+    // Cache for the day
+    regimeCache = { ...result, dateKey: todayKey };
+    console.log("Regime detected:", regimeCache.regime, "| confidence:", regimeCache.confidence);
+    res.json(regimeCache);
+
+  } catch(e) {
+    if (e.message && e.message.startsWith("LOW_CONFIDENCE")) {
+      // ── Retry with Sonnet + web search for richer context ──
+      console.log("Regime: attempting web search retry with Sonnet...");
+      try {
+        const retryBody = {
+          model: "claude-sonnet-4-6",
+          max_tokens: 400,
+          temperature: 0,
+          system: "You are a macro market regime analyst. CRITICAL: Reply ONLY with raw JSON, no markdown, no backticks, no explanation.",
+          tools: [{ type: "web_search_20250305", name: "web_search" }],
+          messages: [{
+            role: "user",
+            content: REGIME_PROMPT + "\n\nSearch the web for: current Fed policy stance, latest inflation data, recent market reaction to economic data (did equities rise or fall on last NFP/CPI?), 10-year Treasury yield trend. Use this to determine the current market regime."
+          }]
+        };
+        const retryPayload = JSON.stringify(retryBody);
+        const retryHeaders = {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(retryPayload),
+          "x-api-key": process.env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+          "anthropic-beta": "web-search-2025-03-05"
+        };
+        const retryResult = await new Promise((resolve, reject) => {
+          const opts = { hostname: "api.anthropic.com", path: "/v1/messages", method: "POST", headers: retryHeaders };
+          const r2 = https.request(opts, rr => {
+            let raw = "";
+            rr.on("data", c => raw += c);
+            rr.on("end", () => {
+              try {
+                const parsed = JSON.parse(raw);
+                if (parsed.error) return reject(new Error(parsed.error.message));
+                const text = (parsed.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
+                resolve(JSON.parse(text.replace(/```json|```/g, "").trim()));
+              } catch(err) { reject(err); }
+            });
+          });
+          r2.on("error", reject);
+          r2.write(retryPayload);
+          r2.end();
+        });
+
+        const validRegimes = ["GNISGN", "GNISBN", "BNISBN", "BNISGNBN"];
+        if (validRegimes.includes(retryResult.regime) && parseInt(retryResult.confidence) >= 3) {
+          regimeCache = { ...retryResult, dateKey: todayKey };
+          console.log("Regime retry succeeded:", regimeCache.regime, "| confidence:", regimeCache.confidence);
+          return res.json(regimeCache);
+        }
+      } catch(retryErr) {
+        console.error("Regime retry failed:", retryErr.message);
+      }
+    }
+
+    // Both attempts failed — return null regime, econ scores neutral
+    console.log("Regime: undetermined — econ will score neutral");
+    const nullRegime = {
+      regime: null,
+      confidence: 0,
+      rationale: "Regime undetermined — insufficient data. Econ card scoring suspended pending regime confirmation.",
+      econScoreFlip: null,
+      dateKey: todayKey
+    };
+    regimeCache = nullRegime;
+    res.json(nullRegime);
+  }
+});
+
+// Regime reset endpoint — call to force re-detection (e.g. after Fed decision)
+app.post("/api/regime/reset", function(req, res) {
+  regimeCache = { regime: null, rationale: null, dateKey: null };
+  console.log("Regime cache cleared");
+  res.json({ ok: true });
+});
+
 // ── Claude API ────────────────────────────────────────────────
 function callClaude(prompt, data, useWebSearch) {
   return new Promise((resolve, reject) => {
@@ -345,7 +527,7 @@ const ECON_PROMPT = [
   "INCLUDE ONLY: Monetary policy (Fed rate decisions, FOMC, Fed speeches, ECB/BOE/BOJ), Labor market (NFP, JOLTS, Jobless Claims, ADP, Unemployment Rate, Average Hourly Earnings), Inflation (CPI, Core CPI, PPI, Core PPI, PCE, Core PCE), Growth (GDP), Sentiment & Manufacturing (ISM Manufacturing, ISM Services, PMI, Consumer Confidence, UoM Sentiment), Energy (EIA Crude Oil Inventories, EIA Natural Gas Storage), London metals session (Gold, Silver, Copper, Platinum London fix or LME), Any HIGH or MEDIUM impact USD event.",
   "EXCLUDE: Low impact events, non-USD data (except London metals).",
   "For each included report: name, actual vs forecast, beat or miss.",
-  "MARKET REGIME (2025-2026): Inflation has cooled but remains above target. Fed is on hold. We are in GOOD NEWS IS GOOD NEWS mode — strong economic data = bullish for equities. Only flip bearish if inflation re-accelerates sharply.",
+  "REGIME_PLACEHOLDER",
   "TIER 1 (dominates everything): Fed rate decision, FOMC, NFP, CPI, PCE. TIER 2 (high weight): JOLTS, Jobless Claims, ADP, Unemployment Rate, PPI. TIER 3 (medium): GDP, ISM, PMI, Sentiment. TIER 4 (lower): Oil/gas inventories, metals.",
   "JOBLESS CLAIMS RULE: Initial Jobless Claims HIGHER than forecast = BEARISH (more people unemployed = labor weakening). Claims LOWER than forecast = BULLISH (fewer unemployed = strong labor). This is the opposite of most indicators — a higher number is bad. 225K vs 213K forecast = MISS = BEARISH.",
   "JOLTS RULE: JOLTS job openings HIGHER than forecast = BULLISH (more demand for workers). JOLTS lower = bearish.",
@@ -448,28 +630,49 @@ app.post("/api/analyze", async function(req, res) {
       const todayStr2 = today2.toISOString().slice(0, 10);
       const dayName2 = today2.toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
 
+      // ── Inject current regime into ECON_PROMPT ──
+      const todayKeyEcon = new Date().toISOString().slice(0, 10);
+      let regimeInstruction;
+      if (regimeCache.regime && regimeCache.dateKey === todayKeyEcon) {
+        const r = regimeCache.regime;
+        const flip = regimeCache.econScoreFlip;
+        regimeInstruction = "CURRENT MARKET REGIME: " + r + " (" + (REGIMES[r] || r) + "). " +
+          "Confidence: " + (regimeCache.confidence || 3) + "/5. " +
+          "Rationale: " + (regimeCache.rationale || "") + " " +
+          (flip
+            ? "REGIME SCORING RULE: This regime means strong economic data (beats) = BEARISH for equities because good data delays Fed cuts. Score beats as bear (-1) and misses as bull (+1) for all TIER 1 and TIER 2 reports. Neutral data scores 0. This is the opposite of normal scoring — apply it rigorously."
+            : "REGIME SCORING RULE: This regime means strong economic data (beats) = BULLISH for equities. Score normally: beats = bull (+1), misses = bear (-1).");
+      } else if (regimeCache.regime === null && regimeCache.dateKey === todayKeyEcon) {
+        // Regime detection ran but returned null (undetermined) — score econ neutral
+        regimeInstruction = "CURRENT MARKET REGIME: UNDETERMINED. Regime detection did not return a confident result. CRITICAL SCORING RULE: You must score ALL reports as 0 (neutral) regardless of beat/miss. Set signal to neutral and score to 0. Do NOT apply any directional bias. In your summary, note the specific data releases and their actuals vs estimates, but state that directional scoring is suspended pending regime confirmation.";
+      } else {
+        // No regime detection has run yet — score econ neutral and prompt regime run
+        regimeInstruction = "CURRENT MARKET REGIME: NOT YET DETECTED. Run regime detection first. CRITICAL SCORING RULE: Score ALL reports as 0 (neutral). Set signal to neutral and score to 0. Note the data releases in your summary but do not apply directional bias.";
+      }
+      const econPromptWithRegime = ECON_PROMPT.replace("REGIME_PLACEHOLDER", regimeInstruction);
+
       if (latestMakeData.econ && latestMakeData.econ.length > 100) {
         rawData = latestMakeData.econ;
-        prompt = ECON_PROMPT;
+        prompt = econPromptWithRegime;
         useSearch = false;
-        console.log("Econ: using Make.com data");
+        console.log("Econ: using Make.com data | regime:", regimeCache.regime || "default-GNISBN");
       } else {
         // Try FMP first
         const fmpEconData = await fetchEconFMP();
         if (fmpEconData) {
           rawData = fmpEconData;
-          prompt = ECON_PROMPT;
+          prompt = econPromptWithRegime;
           useSearch = false;
-          console.log("Econ: using FMP data");
+          console.log("Econ: using FMP data | regime:", regimeCache.regime || "default-GNISBN");
         } else {
           // Web search fallback with Sonnet
           rawData = "NO EXTERNAL DATA";
-          prompt = ECON_PROMPT + " TODAY IS " + dayName2 + " (" + todayStr2 + ")." +
+          prompt = econPromptWithRegime + " TODAY IS " + dayName2 + " (" + todayStr2 + ")." +
             " Search the web for USD economic reports released or scheduled for today " + todayStr2 + "." +
             " Find actual values for Jobless Claims, Natural Gas Storage, and any other USD reports today." +
             " Only include " + todayStr2 + " data.";
           useSearch = true;
-          console.log("Econ: using web search");
+          console.log("Econ: using web search | regime:", regimeCache.regime || "default-GNISBN");
         }
       }
     } else if (topic === "earn") {
