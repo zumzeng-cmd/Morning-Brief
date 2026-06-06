@@ -1422,7 +1422,7 @@ app.post("/api/backtest", async function(req, res) {
     // Use Sonnet for all backtest calls (better recall + web search)
     const body = {
       model: "claude-sonnet-4-6",
-      max_tokens: 600,
+      max_tokens: 1000,
       temperature: 0,
       system: "You are a historical market data analyst. Today is " + dateStr + " (backtest mode). " +
         "CRITICAL: Reply ONLY with raw JSON with fields: signal (bull/bear/neutral), summary (2 sentences), score (1/0/-1), guidance (null), confidence (confirmed/approximate/estimated). " +
@@ -1460,6 +1460,8 @@ app.post("/api/backtest", async function(req, res) {
         });
       });
       req2.on("error", reject);
+      // Web search calls can take up to 60s — set generous timeout
+      req2.setTimeout(90000, () => { req2.destroy(); reject(new Error("Backtest timeout — try again")); });
       req2.write(payload);
       req2.end();
     });
