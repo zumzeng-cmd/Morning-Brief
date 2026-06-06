@@ -896,6 +896,7 @@ const MARKETS_PROMPT = [
 // Derives all instrument bias/bestSetup/direction from card signals.
 // Never relies on Claude for directional decisions.
 function scoreInstruments(econ, earn, premarket, news, metaScore) {
+  // ── Card signals (regime-adjusted) ──
   const econSig    = econ      ? econ.signal      : "neutral";
   const newsSig    = news      ? news.signal      : "neutral";
   const preSig     = premarket ? premarket.signal : "neutral";
@@ -905,30 +906,44 @@ function scoreInstruments(econ, earn, premarket, news, metaScore) {
   const earnScore  = earn      ? parseFloat(earn.score)      || 0 : 0;
   const overallWS  = metaScore ? parseFloat(metaScore.weightedScore) || 0 : 0;
 
-  // ── Derived market conditions ──
-  // Dollar: strong if econ bull AND (news neutral or bull). Weak if econ bear or news bull.
-  const dollarStrong = (econSig === "bull") && (newsSig !== "bull");
-  const dollarWeak   = (econSig === "bear") || (newsSig === "bull" && econSig !== "bull");
+  // ── RAW econ direction — independent of regime flip ──
+  // The regime adjusts how econ scores affect equity bias, but for
+  // dollar/yield/macro condition detection we need the RAW data direction,
+  // not the regime-flipped signal. A strong NFP is still a strong NFP
+  // even if it's bearish for equities under GNISBN regime.
+  // We infer raw econ direction from the news/econ contradiction pattern.
+  const econDataStrong = (econSig === "bull") ||
+    (econSig === "bear" && regimeCache.econScoreFlip === true); // flipped bear = actually strong data
+  const econDataWeak   = (econSig === "bear" && !regimeCache.econScoreFlip) ||
+    (econSig === "bull" && regimeCache.econScoreFlip === true); // flipped bull = actually weak data
 
-  // Risk-off: equities selling off — news bear or premarket bear
+  // ── Market conditions — derived from RAW data direction, not regime-adjusted signals ──
+
+  // Dollar: strong when underlying data is strong (NFP beat, CPI hot) regardless of equity regime
+  // Also check news for yield/dollar language via news signal
+  const dollarStrong = econDataStrong && (newsSig !== "bull");
+  const dollarWeak   = econDataWeak   || (newsSig === "bull" && !econDataStrong);
+
+  // Risk-off: driven purely by market price action — news and premarket capture this correctly
   const riskOff = (newsSig === "bear") || (preSig === "bear");
   const riskOn  = (newsSig === "bull") && (preSig !== "bear");
 
-  // Yields rising: econ bull + news bear (market pricing higher-for-longer)
-  const yieldsRising = (econSig === "bull") && (newsSig === "bear");
-  const yieldsFalling= (econSig === "bear") && (newsSig === "bull");
+  // Yields rising: strong data in a restrictive regime = higher-for-longer pricing
+  // This is a function of raw data strength + regime, not the flipped econ signal
+  const yieldsRising  = econDataStrong && (newsSig === "bear"); // data beat + market selling = yields up
+  const yieldsFalling = econDataWeak   && (newsSig === "bull"); // data miss + market rallying = yields down
 
   // Asia weakness: premarket bear
-  const asiaWeak = preSig === "bear";
+  const asiaWeak   = preSig === "bear";
   const asiaStrong = preSig === "bull";
 
-  // Growth fears: premarket bear + news bear
+  // Growth fears: premarket bear + news bear (global growth deteriorating)
   const growthFears = (preSig === "bear") && (newsSig === "bear");
 
   function sig(s) { return s > 0 ? "bull" : s < 0 ? "bear" : "neutral"; }
 
   // ── EQUITIES ──
-  // Blend econ + news + earn, yield-sensitivity per instrument
+  // Use regime-adjusted econ score (already flipped by GNISBN if applicable)
   const esScore  = (econScore * 0.35) + (newsScore * 0.45) + (earnScore * 0.20);
   const nqScore  = yieldsRising
     ? Math.min(esScore - 0.15, newsScore * 0.6 + econScore * 0.25 + earnScore * 0.15)
@@ -940,52 +955,67 @@ function scoreInstruments(econ, earn, premarket, news, metaScore) {
   const equityBias = { ES: sig(esScore), NQ: sig(nqScore), YM: sig(ymScore), RTY: sig(rtyScore) };
 
   // ── METALS ──
-  // GC: conflicting (risk-off + strong dollar) = neutral
+  // GC rules (in priority order):
+  // 1. Strong dollar + rising yields + risk-off = BEAR (yields & dollar dominate safe-haven bid)
+  // 2. Strong dollar + rising yields (no risk-off) = BEAR
+  // 3. Strong dollar + risk-off (no yields rising) = NEUTRAL (competing forces, no clear winner)
+  // 4. Risk-off alone (dollar neutral/weak) = BULL (safe-haven bid)
+  // 5. Dollar weak or yields falling = BULL
+  // 6. Risk-on + strong dollar + yields rising = BEAR
+  // 7. Default = NEUTRAL
   let gcBias;
-  if (riskOff && dollarStrong) gcBias = "neutral";
-  else if (riskOff || dollarWeak || yieldsFalling) gcBias = "bull";
-  else if (riskOn && dollarStrong && yieldsRising) gcBias = "bear";
-  else gcBias = "neutral";
+  if (dollarStrong && yieldsRising)         gcBias = "bear";   // yields + dollar both headwinds — wins vs safe-haven
+  else if (dollarStrong && riskOff)         gcBias = "neutral"; // competing forces cancel
+  else if (riskOff && !dollarStrong)        gcBias = "bull";    // safe-haven bid with no dollar headwind
+  else if (dollarWeak || yieldsFalling)     gcBias = "bull";    // dollar/yield tailwind
+  else if (riskOn && dollarStrong)          gcBias = "bear";    // risk-on removes safe-haven, dollar adds pressure
+  else                                      gcBias = "neutral";
 
-  // SI: follows GC but shifts toward bear if growth fears (industrial demand)
+  // SI: follows GC direction but more volatile
+  // Industrial demand component means growth fears push it further bear than GC
   let siBias;
-  if (gcBias === "neutral" && growthFears) siBias = "bear";
-  else if (gcBias === "bull" && !growthFears) siBias = "bull";
-  else if (gcBias === "bear" || growthFears) siBias = "bear";
-  else siBias = gcBias;
+  if (gcBias === "bear")                          siBias = "bear";
+  else if (gcBias === "bull" && !growthFears)     siBias = "bull";
+  else if (gcBias === "bull" && growthFears)      siBias = "neutral"; // safe-haven bid offset by industrial demand loss
+  else if (gcBias === "neutral" && growthFears)   siBias = "bear";    // tips bear on industrial weakness
+  else                                            siBias = "neutral";
 
-  // HG: growth fears / Asia weakness = bear, global growth = bull
+  // HG: purely industrial/growth — growth fears or Asia weakness = bear
   let hgBias;
-  if (growthFears || asiaWeak) hgBias = "bear";
+  if (growthFears || asiaWeak)   hgBias = "bear";
   else if (riskOn && asiaStrong) hgBias = "bull";
-  else hgBias = "neutral";
+  else                           hgBias = "neutral";
 
-  // PL: 60% metals complex (GC/SI), 40% industrial (HG)
+  // PL: 60% precious metals complex (GC direction), 40% industrial (HG direction)
   const plMetals = gcBias === "bull" ? 1 : gcBias === "bear" ? -1 : 0;
   const plIndust = hgBias === "bull" ? 1 : hgBias === "bear" ? -1 : 0;
   const plScore  = (plMetals * 0.6) + (plIndust * 0.4);
   const plBias   = sig(plScore);
 
   // ── ENERGIES ──
-  // CL: risk-off + strong dollar = bear; risk-on + weak dollar = bull
+  // CL: growth fears / dollar strength = bear; risk-on / dollar weak = bull
   let clBias;
-  if (riskOff && dollarStrong) clBias = "bear";
-  else if (riskOn && dollarWeak) clBias = "bull";
-  else if (riskOff || dollarStrong) clBias = "bear";
-  else clBias = "neutral";
+  if (growthFears)                  clBias = "bear";  // demand destruction fears dominate
+  else if (riskOff && dollarStrong) clBias = "bear";
+  else if (riskOn  && dollarWeak)   clBias = "bull";
+  else if (dollarStrong)            clBias = "bear";
+  else if (riskOff)                 clBias = "bear";
+  else                              clBias = "neutral";
 
-  // NG: macro-independent, always neutral unless news has NG catalyst
-  // (NG-specific news detection is too unreliable to automate — default neutral)
+  // NG: macro-independent, always neutral (weather/storage driven)
   const ngBias = "neutral";
 
   // ── DXY ──
-  // Strong econ + risk-off (flight to safety + rate premium) = bull
-  // Weak econ or risk-on = bear
+  // Based on RAW data strength + regime — not regime-adjusted econ signal
+  // Strong data = dollar bull (rate premium). Weak data = dollar bear.
+  // Risk-off adds to dollar strength (flight to safety) but doesn't override data.
   let dxyBias;
-  if (econSig === "bull" && riskOff) dxyBias = "bull";
-  else if (econSig === "bull" && !riskOn) dxyBias = "bull";
-  else if (econSig === "bear" || riskOn) dxyBias = "bear";
-  else dxyBias = "neutral";
+  if      (econDataStrong && riskOff)   dxyBias = "bull";  // data strength + safety bid
+  else if (econDataStrong)              dxyBias = "bull";  // data strength alone
+  else if (econDataWeak   && riskOn)    dxyBias = "bear";  // weak data + risk-on = dollar sold
+  else if (econDataWeak)                dxyBias = "bear";  // weak data
+  else if (riskOff)                     dxyBias = "neutral"; // safety bid but no data direction
+  else                                  dxyBias = "neutral";
 
   // ── BEST SETUP per group ──
   // Pick clearest directional (not neutral) + aligns with overall bias signal
