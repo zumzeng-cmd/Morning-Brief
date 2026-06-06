@@ -1172,6 +1172,95 @@ app.post("/api/markets", async function(req, res) {
   }
 });
 
+
+// ── Summary endpoint ──────────────────────────────────────────
+// Generates a plain-English layman's summary of the full dashboard
+const SUMMARY_PROMPT = [
+  "You are explaining today's financial market conditions to someone who is intelligent but not a trader.",
+  "They want to understand what is happening in markets today, why it matters, and what it means — in plain English with no jargon.",
+  "You have been given the full morning brief: the market regime, overall bias, four signal cards (econ, earnings, premarket, news), and market implications for specific instruments.",
+  "Write a clear, conversational summary in 4 short paragraphs:",
+  "PARAGRAPH 1 — THE BIG PICTURE: What is the overall mood in markets today and what is the single most important thing driving it? Use an analogy or plain language. No ticker symbols in this paragraph.",
+  "PARAGRAPH 2 — WHY IT MATTERS: Explain the key cause-and-effect chain. E.g. 'A stronger-than-expected jobs report means the Fed is less likely to cut interest rates soon, which makes borrowing more expensive, which weighs on growth stocks.' Connect the dots for a non-trader.",
+  "PARAGRAPH 3 — WHAT THE MARKETS ARE DOING: Briefly describe what equities, metals, and the dollar are doing today and why — in plain English. You can mention asset names (stocks, gold, dollar, oil) but avoid futures codes like NQ or ES.",
+  "PARAGRAPH 4 — WHAT TO WATCH: One or two things that could change the picture today or this week. Keep it simple and forward-looking.",
+  "TONE: Conversational, clear, confident. Like a smart friend explaining the news over coffee — not a Bloomberg terminal.",
+  "LENGTH: 4 paragraphs, 3-5 sentences each. No headers, no bullet points, no bold text. Just clean readable prose.",
+  "JSON SCHEMA: {",
+  "  \"headline\": \"8-10 word headline summarising today in plain English\",",
+  "  \"paragraphs\": [\"paragraph 1\", \"paragraph 2\", \"paragraph 3\", \"paragraph 4\"]",
+  "}"
+].join(" ");
+
+app.post("/api/summary", async function(req, res) {
+  const { econ, earn, premarket, news, metaScore, regime, markets } = req.body;
+  if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ error: "API key not set" });
+
+  try {
+    const today = new Date().toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
+    const etTime = new Date().toLocaleTimeString("en-US", { hour:"2-digit", minute:"2-digit", hour12:true, timeZone:"America/New_York" });
+
+    const context = [
+      "TODAY: " + today + " | TIME (ET): " + etTime,
+      "REGIME: " + (regime ? regime.regime + " — " + regime.rationale : "Unknown"),
+      "OVERALL BIAS: " + (metaScore ? metaScore.biasLabel + " (score: " + metaScore.weightedScore + ")" : "Unknown"),
+      "RATIONALE: " + (metaScore ? metaScore.rationale : "N/A"),
+      "",
+      "ECON: " + (econ ? econ.signal.toUpperCase() + " | " + econ.summary : "No data"),
+      "EARNINGS: " + (earn ? earn.signal.toUpperCase() + " | " + earn.summary : "No data"),
+      "PRE-MARKET: " + (premarket ? premarket.signal.toUpperCase() + " | " + premarket.summary : "No data"),
+      "NEWS: " + (news ? news.signal.toUpperCase() + " | " + news.summary : "No data"),
+      "",
+      "MARKET IMPLICATIONS:",
+      markets && markets.equities ? "Equities — ES: " + markets.equities.ES.bias + ", NQ: " + markets.equities.NQ.bias + ", YM: " + markets.equities.YM.bias + ", RTY: " + markets.equities.RTY.bias : "",
+      markets && markets.metals   ? "Metals — GC: " + markets.metals.GC.bias + ", SI: " + markets.metals.SI.bias + ", HG: " + markets.metals.HG.bias : "",
+      markets && markets.energies ? "Energies — CL: " + markets.energies.CL.bias : "",
+      markets && markets.dxy      ? "Dollar (DXY): " + markets.dxy.DXY.bias : "",
+    ].filter(Boolean).join("\n");
+
+    const body = {
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 800,
+      temperature: 0,
+      system: "You are a clear, friendly market commentator writing for a non-trader audience. CRITICAL: Reply ONLY with raw JSON, no markdown, no backticks, no explanation.",
+      messages: [{ role: "user", content: SUMMARY_PROMPT + "\n\nDATA:\n" + context }]
+    };
+
+    const payload = JSON.stringify(body);
+    const headers = {
+      "Content-Type": "application/json",
+      "Content-Length": Buffer.byteLength(payload),
+      "x-api-key": process.env.ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01"
+    };
+
+    const result = await new Promise((resolve, reject) => {
+      const options = { hostname: "api.anthropic.com", path: "/v1/messages", method: "POST", headers };
+      const req2 = https.request(options, r => {
+        let raw = "";
+        r.on("data", c => raw += c);
+        r.on("end", () => {
+          try {
+            const parsed = JSON.parse(raw);
+            if (parsed.error) return reject(new Error(parsed.error.message));
+            const text = (parsed.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
+            resolve(JSON.parse(text.replace(/```json|```/g, "").trim()));
+          } catch(e) { reject(new Error("Parse error: " + e.message)); }
+        });
+      });
+      req2.on("error", reject);
+      req2.write(payload);
+      req2.end();
+    });
+
+    console.log("Summary generated");
+    res.json(result);
+  } catch(e) {
+    console.error("Summary error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get("/health", function(req, res) {
   res.json({ status: "ok", apiKeySet: !!process.env.ANTHROPIC_API_KEY });
 });
