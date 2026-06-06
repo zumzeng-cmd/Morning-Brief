@@ -1261,6 +1261,241 @@ app.post("/api/summary", async function(req, res) {
   }
 });
 
+
+// ── Backtest endpoint ─────────────────────────────────────────
+// Hybrid: Claude Memory Mode (pre-Aug 2025) or API History Mode (post-Aug 2025)
+const MEMORY_CUTOFF = new Date("2025-08-31");
+
+// Prompts for memory-mode reconstruction
+function buildMemoryPrompt(topic, dateStr) {
+  const base = "You are reconstructing historical market data for " + dateStr + " from your training data. " +
+    "Search the web to supplement your recall with accurate data. " +
+    "IMPORTANT: This is historical reconstruction — include a one-sentence confidence note at the end of your summary " +
+    "stating which data points are confirmed vs approximate. " +
+    "Reply ONLY with raw JSON with fields: signal (bull/bear/neutral), summary (2 sentences), score (1/0/-1), guidance (null), confidence (confirmed/approximate/estimated).";
+
+  const topics = {
+    econ: "Reconstruct the US economic calendar for " + dateStr + ". " +
+      "Search for: what major USD economic reports were released that day (NFP, CPI, FOMC, jobless claims, etc), " +
+      "their actual values vs consensus estimates, and whether they beat or missed. " +
+      "Apply the correct market regime for that date when scoring. " +
+      "If no major reports were scheduled, score neutral. " + base,
+
+    earn: "Reconstruct the earnings landscape for " + dateStr + " (including AMC reports from the prior day). " +
+      "Search for: which S&P500/Nasdaq companies reported earnings on or around " + dateStr + ", " +
+      "their EPS actual vs estimate, revenue vs estimate, and any notable forward guidance. " +
+      "Focus on mega-caps (NVDA, AAPL, MSFT, META, GOOGL, AMZN, TSLA, AVGO) and large-caps first. " + base,
+
+    premarket: "Reconstruct the pre-market conditions on the morning of " + dateStr + ". " +
+      "Search for: how Asian markets (HSI, Nikkei, ASX, Shanghai, STI) and European markets " +
+      "(STOXX, DAX, FTSE, AEX, CAC) performed overnight before US open on that date. " +
+      "Also find US futures direction (NQ, ES) pre-market that morning. " + base,
+
+    news: "Reconstruct the dominant market news narrative for " + dateStr + ". " +
+      "Search for: what were the top market-moving stories and themes that day — " +
+      "Fed commentary, geopolitical events, sector moves, macro surprises. " +
+      "Score based on net impact on US index futures (NQ/ES) that day. " + base
+  };
+  return topics[topic] || base;
+}
+
+// Fetch historical Finnhub quote for a specific date
+async function fetchHistoricalPremarket(dateStr) {
+  const FINNHUB_KEY = process.env.FINNHUB_API_KEY || "d8gh1phr01qlgcujfjfgd8gh1phr01qlgcujfjg0";
+  const date = new Date(dateStr);
+  const fromTs = Math.floor(date.getTime() / 1000) - 86400;
+  const toTs   = Math.floor(date.getTime() / 1000) + 3600;
+
+  const symbols = [
+    { symbol: "EWH",  label: "HSI (Hang Seng)",    region: "asia" },
+    { symbol: "EWJ",  label: "Nikkei 225",          region: "asia" },
+    { symbol: "EWA",  label: "ASX 200",             region: "asia" },
+    { symbol: "MCHI", label: "Shanghai Composite",  region: "asia" },
+    { symbol: "EWS",  label: "STI (Singapore)",     region: "asia" },
+    { symbol: "VGK",  label: "STOXX 600",           region: "europe" },
+    { symbol: "EWG",  label: "DAX",                 region: "europe" },
+    { symbol: "EWU",  label: "FTSE 100",            region: "europe" },
+    { symbol: "EWN",  label: "AEX (Netherlands)",   region: "europe" },
+    { symbol: "EWQ",  label: "CAC 40",              region: "europe" },
+  ];
+
+  try {
+    const results = await Promise.all(symbols.map(async (s) => {
+      try {
+        const url = "https://finnhub.io/api/v1/stock/candle?symbol=" + s.symbol +
+          "&resolution=D&from=" + fromTs + "&to=" + toTs + "&token=" + FINNHUB_KEY;
+        const raw = await fetchUrl(url);
+        const q = JSON.parse(raw);
+        if (!q || q.s === "no_data" || !q.c || q.c.length < 2) return { ...s, pct: null, status: "unavailable" };
+        const prev = q.c[q.c.length - 2];
+        const curr = q.c[q.c.length - 1];
+        const pct = prev ? ((curr - prev) / prev) * 100 : 0;
+        const status = pct > 0.1 ? "up" : pct < -0.1 ? "down" : "flat";
+        return { ...s, pct: parseFloat(pct.toFixed(2)), status };
+      } catch(e) { return { ...s, pct: null, status: "unavailable" }; }
+    }));
+
+    function fmt(items, name) {
+      const lines = items.map(r => r.status === "unavailable" ? r.label + ": N/A"
+        : r.label + ": " + (r.status === "up" ? "UP" : r.status === "down" ? "DOWN" : "FLAT") +
+          " " + (r.pct >= 0 ? "+" : "") + r.pct + "%").join("\n");
+      const up = items.filter(r => r.status === "up").length;
+      const dn = items.filter(r => r.status === "down").length;
+      const verdict = up >= 3 ? "BULLISH" : dn >= 3 ? "BEARISH" : "MIXED";
+      return name + " [" + verdict + "]:\n" + lines;
+    }
+
+    return [
+      "HISTORICAL PRE-MARKET DATA FOR " + dateStr + ":",
+      fmt(results.filter(r => r.region === "asia"),   "ASIA"),
+      fmt(results.filter(r => r.region === "europe"), "EUROPE")
+    ].join("\n\n");
+  } catch(e) {
+    console.log("Historical premarket error:", e.message);
+    return null;
+  }
+}
+
+app.post("/api/backtest", async function(req, res) {
+  const { date, topic } = req.body;
+  if (!date || !topic) return res.status(400).json({ error: "Missing date or topic" });
+  if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ error: "API key not set" });
+
+  const targetDate = new Date(date);
+  const isMemoryMode = targetDate <= MEMORY_CUTOFF;
+  const dateStr = date; // YYYY-MM-DD
+
+  console.log("Backtest:", dateStr, "| topic:", topic, "| mode:", isMemoryMode ? "MEMORY" : "API");
+
+  try {
+    let prompt, rawData, useSearch = false;
+
+    if (isMemoryMode) {
+      // ── Claude Memory Mode — Sonnet + web search ──
+      prompt = buildMemoryPrompt(topic, dateStr);
+      rawData = "NO EXTERNAL DATA — use web search to find historical data for " + dateStr;
+      useSearch = true;
+    } else {
+      // ── API History Mode — FMP + Finnhub historical data ──
+      const FMP_KEY = process.env.FMP_API_KEY || "WQMcZiIIJ1rarvN3puluUNQoGXFdvkjg";
+      const prevDate = new Date(targetDate);
+      prevDate.setDate(prevDate.getDate() - 1);
+      const prevStr = prevDate.toISOString().slice(0, 10);
+
+      if (topic === "econ") {
+        try {
+          const raw = await fetchUrl("https://financialmodelingprep.com/stable/economic-calendar?from=" + dateStr + "&to=" + dateStr + "&apikey=" + FMP_KEY);
+          rawData = "HISTORICAL ECONOMIC CALENDAR FOR " + dateStr + ":\n" + raw;
+        } catch(e) { rawData = null; }
+        const regimeForDate = "Use the correct market regime for " + dateStr + " based on Fed policy and inflation at that time.";
+        prompt = ECON_PROMPT.replace("REGIME_PLACEHOLDER", regimeForDate);
+        if (!rawData) { rawData = "NO FMP DATA"; useSearch = true; }
+
+      } else if (topic === "earn") {
+        try {
+          const [todayRaw, yestRaw] = await Promise.all([
+            fetchUrl("https://financialmodelingprep.com/stable/earnings-calendar?from=" + dateStr + "&to=" + dateStr + "&apikey=" + FMP_KEY),
+            fetchUrl("https://financialmodelingprep.com/stable/earnings-calendar?from=" + prevStr + "&to=" + prevStr + "&apikey=" + FMP_KEY)
+          ]);
+          rawData = "HISTORICAL EARNINGS FOR " + prevStr + "-" + dateStr + ":\n" + yestRaw + "\n" + todayRaw;
+        } catch(e) { rawData = null; }
+        prompt = EARN_PROMPT + " CURRENT TIME (ET): 09:30 AM. BACKTEST DATE: " + dateStr + ".";
+        if (!rawData) { rawData = "NO FMP DATA"; useSearch = true; }
+
+      } else if (topic === "premarket") {
+        rawData = await fetchHistoricalPremarket(dateStr);
+        prompt = PREMARKET_PROMPT;
+        if (!rawData) {
+          prompt = buildMemoryPrompt("premarket", dateStr);
+          rawData = "NO FINNHUB DATA";
+          useSearch = true;
+        }
+
+      } else if (topic === "news") {
+        // News has no historical API — always use memory/search
+        prompt = buildMemoryPrompt("news", dateStr);
+        rawData = "NO EXTERNAL DATA — search for market news and dominant narrative for " + dateStr;
+        useSearch = true;
+      }
+    }
+
+    // Use Sonnet for all backtest calls (better recall + web search)
+    const body = {
+      model: "claude-sonnet-4-6",
+      max_tokens: 600,
+      temperature: 0,
+      system: "You are a historical market data analyst. Today is " + dateStr + " (backtest mode). " +
+        "CRITICAL: Reply ONLY with raw JSON with fields: signal (bull/bear/neutral), summary (2 sentences), score (1/0/-1), guidance (null), confidence (confirmed/approximate/estimated). " +
+        "confidence field: confirmed = verified from data/search, approximate = recalled from training, estimated = inferred from context.",
+      messages: [{ role: "user", content: prompt + (rawData && rawData !== "NO EXTERNAL DATA" && rawData !== "NO FMP DATA" && rawData !== "NO FINNHUB DATA" ? "\n\nDATA:\n" + rawData : "") }]
+    };
+    if (useSearch) body.tools = [{ type: "web_search_20250305", name: "web_search" }];
+
+    const payload = JSON.stringify(body);
+    const headers = {
+      "Content-Type": "application/json",
+      "Content-Length": Buffer.byteLength(payload),
+      "x-api-key": process.env.ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01"
+    };
+    if (useSearch) headers["anthropic-beta"] = "web-search-2025-03-05";
+
+    const result = await new Promise((resolve, reject) => {
+      const options = { hostname: "api.anthropic.com", path: "/v1/messages", method: "POST", headers };
+      const req2 = https.request(options, r => {
+        let raw = "";
+        r.on("data", c => raw += c);
+        r.on("end", () => {
+          try {
+            const parsed = JSON.parse(raw);
+            if (parsed.error) return reject(new Error(parsed.error.message));
+            const text = (parsed.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
+            const cleaned = text.replace(/```json|```/g, "").trim();
+            const out = JSON.parse(cleaned);
+            if (!out.hasOwnProperty("guidance")) out.guidance = null;
+            if (!out.hasOwnProperty("confidence")) out.confidence = "estimated";
+            out.backtestMode = isMemoryMode ? "memory" : "api";
+            resolve(out);
+          } catch(e) { reject(new Error("Parse error: " + e.message)); }
+        });
+      });
+      req2.on("error", reject);
+      req2.write(payload);
+      req2.end();
+    });
+
+    console.log("Backtest result for", topic, "on", dateStr, ":", result.signal, "| confidence:", result.confidence);
+    res.json(result);
+  } catch(e) {
+    console.error("Backtest error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Backtest history — stored separately from live history
+const BACKTEST_FILE = path.join(__dirname, "backtest-history.json");
+function loadBacktestHistory() {
+  try { if (fs.existsSync(BACKTEST_FILE)) return JSON.parse(fs.readFileSync(BACKTEST_FILE, "utf8")); }
+  catch(e) {}
+  return {};
+}
+function saveBacktestHistory(h) {
+  try { fs.writeFileSync(BACKTEST_FILE, JSON.stringify(h, null, 2)); }
+  catch(e) { console.error("Backtest history save error:", e.message); }
+}
+
+app.post("/api/backtest/history/save", function(req, res) {
+  const { dateKey, snapshot } = req.body;
+  if (!dateKey || !snapshot) return res.status(400).json({ error: "Missing dateKey or snapshot" });
+  const history = loadBacktestHistory();
+  history[dateKey] = { ...snapshot, isBacktest: true, savedAt: new Date().toISOString() };
+  saveBacktestHistory(history);
+  console.log("Backtest history saved for:", dateKey);
+  res.json({ ok: true, dateKey });
+});
+
+app.get("/api/backtest/history", function(req, res) { res.json(loadBacktestHistory()); });
+
 app.get("/health", function(req, res) {
   res.json({ status: "ok", apiKeySet: !!process.env.ANTHROPIC_API_KEY });
 });
