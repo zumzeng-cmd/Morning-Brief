@@ -421,6 +421,12 @@ function switchToToday(){
   document.querySelector('.history-section').style.display='block';
   var rb=document.getElementById('rationaleBox');
   if(rb) rb.style.display = lastResults && Object.keys(lastResults).length > 0 ? 'flex' : 'none';
+  // Restore regime bar if analysis has run
+  var regBar=document.getElementById('regimeBar');
+  if(regBar) regBar.style.display = lastRegime ? 'flex' : 'none';
+  // Deactivate summary tab button
+  var btnS=document.getElementById('btnSummary');
+  if(btnS) btnS.classList.remove('active');
 }
 
 function switchToHistory(){
@@ -778,8 +784,11 @@ async function runAll(){
   btn.disabled=false;btn.textContent='↺ REFRESH ANALYSIS';
   document.getElementById('footerNote').textContent='Last run: '+new Date().toLocaleTimeString()+' · Auto-saved to history';
 
-  // ── Auto-load markets tab in background after analysis completes ──
+  // ── Auto-load markets + summary in background after analysis completes ──
+  // Markets runs first, summary runs after (summary uses market results)
   loadMarketsBackground();
+  // Note: loadSummaryBackground is already called inside loadMarketsBackground
+  // after markets data is ready, so summary auto-fires in the correct sequence.
 }
 
 async function loadMarketsBackground() {
@@ -827,9 +836,10 @@ async function loadMarketsBackground() {
       marketsBtn.textContent = '↺ REFRESH IMPLICATIONS';
     }
 
-    // Auto-generate summary in background after markets load
-    loadSummaryBackground();
   }
+
+  // Auto-generate summary regardless of markets success/failure
+  loadSummaryBackground();
 }
 
 // history
