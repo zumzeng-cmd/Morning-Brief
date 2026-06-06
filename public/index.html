@@ -167,6 +167,32 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 .market-card.best { border-color: rgba(255,184,0,0.5); box-shadow: 0 0 12px rgba(255,184,0,0.08); }
 
 
+
+/* regime indicator */
+.regime-bar {
+  display:flex; align-items:center; gap:10px;
+  padding:7px 14px; margin-bottom:1rem;
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:4px; font-size:10px; letter-spacing:0.1em;
+}
+.regime-label { color:var(--muted); text-transform:uppercase; white-space:nowrap; }
+.regime-badge {
+  font-weight:700; padding:2px 10px; border-radius:2px;
+  letter-spacing:0.1em; text-transform:uppercase; font-size:10px;
+}
+.regime-GNISBN  { background:rgba(255,68,68,0.12); color:#FF4444; border:1px solid rgba(255,68,68,0.3); }
+.regime-GNISGN  { background:rgba(0,255,148,0.10); color:var(--bull); border:1px solid rgba(0,255,148,0.3); }
+.regime-BNISBN  { background:rgba(255,68,68,0.08); color:#cc4444; border:1px solid rgba(255,68,68,0.2); }
+.regime-BNISGNBN{ background:rgba(0,255,148,0.07); color:#7AE89A; border:1px solid rgba(0,255,148,0.2); }
+.regime-rationale { font-size:10px; color:var(--muted); flex:1; }
+.regime-conf { font-size:9px; color:var(--muted); white-space:nowrap; opacity:0.6; }
+.regime-reset-btn {
+  font-size:9px; padding:2px 8px; border:1px solid var(--border);
+  background:transparent; color:var(--muted); cursor:pointer;
+  font-family:var(--font-mono); border-radius:2px; letter-spacing:0.06em;
+  transition:all 0.15s; white-space:nowrap;
+}
+.regime-reset-btn:hover { border-color:var(--accent2); color:var(--accent2); }
 </style>
 </head>
 <body>
@@ -191,6 +217,15 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
       <input type="date" id="datePicker" style="display:none;background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:11px;padding:4px 8px;border-radius:3px;outline:none;" onchange="loadDate(this.value)"/>
       <button class="dnbtn" id="btnHist" onclick="switchToHistory()">HISTORY</button>
     </div>
+  </div>
+
+  <!-- regime indicator -->
+  <div class="regime-bar" id="regimeBar" style="display:none;">
+    <span class="regime-label">Regime:</span>
+    <span class="regime-badge" id="regimeBadge">DETECTING...</span>
+    <span class="regime-rationale" id="regimeRationale"></span>
+    <span class="regime-conf" id="regimeConf"></span>
+    <button class="regime-reset-btn" onclick="resetRegime()" title="Force re-detect regime">↺ RE-DETECT</button>
   </div>
 
   <!-- bias banner -->
@@ -297,6 +332,7 @@ let historyMode=false;
 let allHistory={};
 var lastResults={};
 var lastMetaScore=null;
+var lastRegime=null;
 const BASE='';
 
 // clock
@@ -549,6 +585,45 @@ async function runAll(){
   const keys=['econ','earn','premarket','news'];
   keys.forEach(k=>setCardLoading(k));
   const results={};
+
+  // ── Step 0: Detect regime before card analyses ──
+  // Fetch premarket and news raw data first for regime context,
+  // then run regime detection, then run all cards with regime applied.
+  var regimeBar = document.getElementById('regimeBar');
+  var regimeBadge = document.getElementById('regimeBadge');
+  var regimeRationale = document.getElementById('regimeRationale');
+  var regimeConf = document.getElementById('regimeConf');
+  regimeBar.style.display = 'flex';
+  regimeBadge.textContent = 'DETECTING...';
+  regimeBadge.className = 'regime-badge';
+  regimeRationale.textContent = 'Analyzing macro regime...';
+  try {
+    var regRes = await fetch(BASE + '/api/regime', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newsData: null, premarketData: null })
+    });
+    var regData = await regRes.json();
+    lastRegime = regData;
+    if (regData.regime) {
+      regimeBadge.textContent = regData.regime;
+      regimeBadge.className = 'regime-badge regime-' + regData.regime;
+      regimeConf.textContent = 'Confidence: ' + (regData.confidence || '?') + '/5';
+    } else {
+      regimeBadge.textContent = 'UNDETERMINED';
+      regimeBadge.className = 'regime-badge';
+      regimeBadge.style.background = 'rgba(74,86,104,0.2)';
+      regimeBadge.style.color = 'var(--muted)';
+      regimeBadge.style.border = '1px solid var(--border)';
+      regimeConf.textContent = 'Econ scoring suspended';
+    }
+    regimeRationale.textContent = regData.rationale || '';
+  } catch(e) {
+    console.error('Regime detection error:', e);
+    regimeBadge.textContent = 'GNISBN';
+    regimeBadge.className = 'regime-badge regime-GNISBN';
+    regimeRationale.textContent = 'Default regime applied (Fed on hold, inflation above target).';
+  }
   for(const key of keys){
     try{
       const result=await analyze(key);
@@ -760,6 +835,22 @@ var lastMarketResults = null;
 async function loadMarkets() {
   // Manual refresh — just delegates to the same background loader
   await loadMarketsBackground();
+}
+
+async function resetRegime() {
+  var regimeBadge = document.getElementById('regimeBadge');
+  var regimeRationale = document.getElementById('regimeRationale');
+  regimeBadge.textContent = 'RESETTING...';
+  regimeRationale.textContent = '';
+  try {
+    await fetch(BASE + '/api/regime/reset', { method: 'POST' });
+    regimeBadge.textContent = 'WILL RE-DETECT ON NEXT RUN';
+    regimeBadge.className = 'regime-badge';
+    regimeRationale.textContent = 'Run analysis to detect fresh regime.';
+    lastRegime = null;
+  } catch(e) {
+    regimeBadge.textContent = 'RESET FAILED';
+  }
 }
 
 async function loadHistory(){
