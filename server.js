@@ -575,9 +575,10 @@ const NEWS_PROMPT = [
   "LEVEL 3 - HIGH IMPACT: Fed speaker hawkish/dovish shift, Middle East escalation, trade action, regulatory ruling.",
   "LEVEL 2 - MEDIUM: Sector news, individual large-cap catalyst.",
   "LEVEL 1 - LOW (do not score): Routine analyst calls, minor company news.",
+  "TIEBREAKER RULE: If multiple stories conflict (e.g. hawkish rate narrative AND geopolitical tensions), score based on whichever has the LARGER index impact. A hot jobs report delaying Fed cuts = Level 3-4 bearish for NQ/ES. An oil price surge without supply shock = Level 2 at most. Do NOT score neutral just because two stories conflict — identify the dominant driver and score it.",
+  "HAWKISH RULE: If the dominant news is rate-cut delays, higher-for-longer Fed narrative, or yields rising on economic strength, score BEARISH (-1). This is unambiguous bearish for growth equities regardless of any positive geopolitical or commodity offsets.",
   "IMPORTANT: Do NOT include level labels like Level 3 or Level 4 in your summary text. Write natural plain English.",
-  "Score: bull=1, bear=-1, neutral=0.",
-  // ── MODIFIED: guidance is not applicable for news ──
+  "Score: bull=1, bear=-1, neutral=0. Reserve neutral ONLY for days with genuinely no directional catalyst — not for days where competing stories exist.",
   "JSON SCHEMA: {\"signal\":\"bull|bear|neutral\",\"summary\":\"2 sentence summary\",\"score\":1,\"guidance\":null}"
 ].join(" ");
 
@@ -916,27 +917,36 @@ function scoreInstruments(econ, earn, premarket, news, metaScore, regime) {
   const econDataWeak   = (econSig === "bear" && !econFlipped) ||
     (econSig === "bull" && econFlipped);  // flipped bull = actually weak data
 
-  // ── Market conditions — derived from RAW data direction, not regime-adjusted signals ──
+  // ── Market conditions — derived from RAW data direction + market signals ──
+  // When econ is neutral (no data released, e.g. Fed speech day), we infer
+  // dollar/yield conditions from premarket + news alone. Premarket bearish
+  // with news bearish on a prior strong data day = yields still elevated.
 
-  // Dollar: strong when underlying data is strong (NFP beat, CPI hot) regardless of equity regime
-  // Also check news for yield/dollar language via news signal
-  const dollarStrong = econDataStrong && (newsSig !== "bull");
-  const dollarWeak   = econDataWeak   || (newsSig === "bull" && !econDataStrong);
+  const econIsNeutral = !econDataStrong && !econDataWeak; // econ scored 0, no directional data
 
-  // Risk-off: driven purely by market price action — news and premarket capture this correctly
+  // Dollar: strong when underlying data is strong OR when prior strong data
+  // is still driving the narrative (inferred from news bearish on neutral econ day)
+  const dollarStrong = (econDataStrong && newsSig !== "bull") ||
+    (econIsNeutral && newsSig === "bear" && preSig === "bear"); // prior strong data echo
+  const dollarWeak   = (econDataWeak && !econIsNeutral) ||
+    (newsSig === "bull" && !econDataStrong && !econIsNeutral);
+
+  // Risk-off: driven purely by market price action
   const riskOff = (newsSig === "bear") || (preSig === "bear");
   const riskOn  = (newsSig === "bull") && (preSig !== "bear");
 
-  // Yields rising: strong data in a restrictive regime = higher-for-longer pricing
-  // This is a function of raw data strength + regime, not the flipped econ signal
-  const yieldsRising  = econDataStrong && (newsSig === "bear"); // data beat + market selling = yields up
-  const yieldsFalling = econDataWeak   && (newsSig === "bull"); // data miss + market rallying = yields down
+  // Yields rising: strong data in restrictive regime = higher-for-longer pricing
+  // Also infer yields still elevated if econ neutral but both news + pre bearish
+  // (prior NFP beat is still driving yield narrative next session)
+  const yieldsRising  = (econDataStrong && newsSig === "bear") ||
+    (econIsNeutral && newsSig === "bear" && preSig === "bear");
+  const yieldsFalling = econDataWeak && newsSig === "bull";
 
   // Asia weakness: premarket bear
   const asiaWeak   = preSig === "bear";
   const asiaStrong = preSig === "bull";
 
-  // Growth fears: premarket bear + news bear (global growth deteriorating)
+  // Growth fears: premarket bear + news bear
   const growthFears = (preSig === "bear") && (newsSig === "bear");
 
   function sig(s) { return s > 0 ? "bull" : s < 0 ? "bear" : "neutral"; }
@@ -1028,7 +1038,10 @@ function scoreInstruments(econ, earn, premarket, news, metaScore, regime) {
     return pool[0];
   }
 
-  const equityBest = pickBest(["NQ","ES","RTY","YM"], equityBias);
+  // NQ leads equities when yields are rising (most rate-sensitive)
+  // RTY leads only when growth/credit fears dominate without yield driver
+  const equityOrder = yieldsRising ? ["NQ","ES","YM","RTY"] : ["NQ","ES","RTY","YM"];
+  const equityBest = pickBest(equityOrder, equityBias);
   const metalsBest = pickBest(["HG","GC","SI","PL"], { GC: gcBias, SI: siBias, HG: hgBias, PL: plBias });
   const energyBest = pickBest(["CL","NG"], { CL: clBias, NG: ngBias });
 
