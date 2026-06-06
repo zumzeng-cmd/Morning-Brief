@@ -235,6 +235,68 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 .summary-refresh-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); background: rgba(0,255,148,0.04); }
 .summary-refresh-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .summary-timestamp { font-size: 10px; color: var(--muted); text-align: center; margin-top: 0.6rem; letter-spacing: 0.06em; }
+
+/* ── Backtest mode ── */
+body.backtest-mode { --accent:#FFB800; --bull:#FFB800; }
+body.backtest-mode .hdr-title { color: var(--accent2); }
+body.backtest-mode .run-btn { border-color: var(--accent2); color: var(--accent2); }
+body.backtest-mode .run-btn:hover:not(:disabled) { background: rgba(255,184,0,0.08); }
+
+.backtest-bar {
+  display: none; align-items: center; gap: 10px;
+  padding: 8px 14px; margin-bottom: 1rem;
+  background: rgba(255,184,0,0.07);
+  border: 1px solid rgba(255,184,0,0.3); border-radius: 4px;
+}
+.backtest-badge {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.14em;
+  padding: 3px 10px; border-radius: 2px; text-transform: uppercase;
+  background: rgba(255,184,0,0.15); color: var(--accent2);
+  border: 1px solid rgba(255,184,0,0.4);
+}
+.backtest-date-label { font-size: 11px; color: var(--accent2); letter-spacing: 0.08em; }
+.backtest-mode-label { font-size: 10px; color: var(--muted); letter-spacing: 0.06em; }
+.confidence-badge {
+  font-size: 9px; padding: 1px 6px; border-radius: 2px; margin-left: 6px;
+  letter-spacing: 0.06em; text-transform: uppercase;
+}
+.conf-confirmed { background: rgba(0,255,148,0.1); color: var(--bull); border: 1px solid rgba(0,255,148,0.3); }
+.conf-approximate { background: rgba(255,184,0,0.1); color: var(--accent2); border: 1px solid rgba(255,184,0,0.3); }
+.conf-estimated { background: rgba(255,68,68,0.1); color: var(--bear); border: 1px solid rgba(255,68,68,0.3); }
+
+.backtest-toggle-wrap {
+  display: flex; align-items: center; gap: 10px;
+  margin-left: auto;
+}
+.toggle-label { font-size: 10px; letter-spacing: 0.1em; color: var(--muted); text-transform: uppercase; }
+.toggle-switch {
+  position: relative; width: 44px; height: 22px; cursor: pointer;
+}
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+  position: absolute; inset: 0; border-radius: 22px;
+  background: var(--surface2); border: 1px solid var(--border);
+  transition: all 0.25s;
+}
+.toggle-slider::before {
+  content: ""; position: absolute; height: 16px; width: 16px;
+  left: 2px; bottom: 2px; border-radius: 50%;
+  background: var(--muted); transition: all 0.25s;
+}
+.toggle-switch input:checked + .toggle-slider { background: rgba(255,184,0,0.2); border-color: var(--accent2); }
+.toggle-switch input:checked + .toggle-slider::before { transform: translateX(22px); background: var(--accent2); }
+
+.backtest-date-pick {
+  display: none; align-items: center; gap: 8px;
+  padding: 6px 12px; background: var(--surface);
+  border: 1px solid rgba(255,184,0,0.3); border-radius: 4px; margin-bottom: 1rem;
+}
+.backtest-date-pick input[type=date] {
+  background: transparent; border: none; color: var(--accent2);
+  font-family: var(--font-mono); font-size: 13px; outline: none;
+}
+.backtest-date-pick input[type=date]::-webkit-calendar-picker-indicator { filter: invert(0.7) sepia(1) hue-rotate(10deg); }
+.backtest-run-note { font-size: 10px; color: var(--muted); letter-spacing: 0.06em; }
 </style>
 </head>
 <body>
@@ -256,7 +318,14 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
     <button class="dnbtn" id="btnMarkets" onclick="switchToMarkets()">MARKETS</button>
     <button class="dnbtn" id="btnSummary" onclick="switchToSummary()">SUMMARY</button>
     <span class="mode-badge mode-live" id="modeBadge">LIVE</span>
-    <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+    <div class="backtest-toggle-wrap">
+      <span class="toggle-label">Backtest</span>
+      <label class="toggle-switch">
+        <input type="checkbox" id="backtestToggle" onchange="toggleBacktestMode(this.checked)"/>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div style="margin-left:12px;display:flex;align-items:center;gap:8px;">
       <input type="date" id="datePicker" style="display:none;background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:11px;padding:4px 8px;border-radius:3px;outline:none;" onchange="loadDate(this.value)"/>
       <button class="dnbtn" id="btnHist" onclick="switchToHistory()">HISTORY</button>
     </div>
@@ -269,6 +338,20 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
     <span class="regime-rationale" id="regimeRationale"></span>
     <span class="regime-conf" id="regimeConf"></span>
     <button class="regime-reset-btn" onclick="resetRegime()" title="Force re-detect regime">↺ RE-DETECT</button>
+  </div>
+
+  <!-- backtest indicator bar -->
+  <div class="backtest-bar" id="backtestBar">
+    <span class="backtest-badge">&#9654; BACKTEST</span>
+    <span class="backtest-date-label" id="backtestDateLabel">—</span>
+    <span class="backtest-mode-label" id="backtestModeLabel"></span>
+  </div>
+
+  <!-- backtest date picker -->
+  <div class="backtest-date-pick" id="backtestDatePick">
+    <span style="font-size:10px;color:var(--accent2);letter-spacing:0.1em;text-transform:uppercase;">Backtest Date:</span>
+    <input type="date" id="backtestDateInput" max="2026-12-31"/>
+    <span class="backtest-run-note">Select a date then hit RUN ANALYSIS</span>
   </div>
 
   <!-- bias banner -->
@@ -669,6 +752,30 @@ async function runAll(){
   keys.forEach(k=>setCardLoading(k));
   const results={};
 
+  // ── Route: backtest or live ──
+  if (backtestActive) {
+    var btDate = document.getElementById('backtestDateInput').value;
+    if (!btDate) { alert('Please select a backtest date.'); running=false; btn.disabled=false; btn.textContent='▶ RUN BACKTEST'; return; }
+    updateBacktestDateLabel(btDate);
+    // Run backtest for all 4 topics
+    for (var bk of keys) {
+      try {
+        var bResult = await analyzeBacktest(bk);
+        setCardResult(bk, bResult);
+        setCardConfidence(bk, bResult.confidence || 'estimated');
+        results[bk] = bResult;
+      } catch(e) { console.error('Backtest error', bk, e); setCardError(bk); }
+      await new Promise(r=>setTimeout(r,800));
+    }
+    await saveBacktestSnapshot(results, btDate);
+    // Show backtest mode label on cards
+    document.getElementById('modeBadge').textContent = 'BACKTEST • ' + btDate;
+    running=false; btn.disabled=false; btn.textContent='↺ RUN BACKTEST';
+    document.getElementById('footerNote').textContent = 'Backtest for ' + btDate + ' complete';
+    loadMarketsBackground();
+    return;
+  }
+
   // ── Step 0: Detect regime before card analyses ──
   // Fetch premarket and news raw data first for regime context,
   // then run regime detection, then run all cards with regime applied.
@@ -1011,6 +1118,97 @@ async function resetRegime() {
     lastRegime = null;
   } catch(e) {
     regimeBadge.textContent = 'RESET FAILED';
+  }
+}
+
+
+// ── Backtest mode ──────────────────────────────────────────────
+var backtestActive = false;
+var backtestDate = null;
+var MEMORY_CUTOFF = new Date("2025-08-31");
+
+function toggleBacktestMode(on) {
+  backtestActive = on;
+  var bar  = document.getElementById('backtestBar');
+  var pick = document.getElementById('backtestDatePick');
+  var runBtn = document.getElementById('runBtn');
+
+  if (on) {
+    bar.style.display  = 'flex';
+    pick.style.display = 'flex';
+    runBtn.textContent = '▶ RUN BACKTEST';
+    runBtn.style.borderColor = 'var(--accent2)';
+    runBtn.style.color = 'var(--accent2)';
+    document.getElementById('modeBadge').textContent = 'BACKTEST';
+    document.getElementById('modeBadge').className   = 'mode-badge mode-hist';
+    // Default to yesterday
+    var d = new Date(); d.setDate(d.getDate()-1);
+    document.getElementById('backtestDateInput').value = d.toISOString().slice(0,10);
+    updateBacktestDateLabel(document.getElementById('backtestDateInput').value);
+  } else {
+    bar.style.display  = 'none';
+    pick.style.display = 'none';
+    runBtn.textContent = '▶ RUN ANALYSIS';
+    runBtn.style.borderColor = '';
+    runBtn.style.color = '';
+    document.getElementById('modeBadge').textContent = 'LIVE';
+    document.getElementById('modeBadge').className   = 'mode-badge mode-live';
+    backtestDate = null;
+  }
+}
+
+function updateBacktestDateLabel(dateStr) {
+  backtestDate = dateStr;
+  var d = new Date(dateStr + 'T12:00:00');
+  var label = d.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric', year:'numeric' }).toUpperCase();
+  document.getElementById('backtestDateLabel').textContent = label;
+  var isMemory = new Date(dateStr) <= MEMORY_CUTOFF;
+  document.getElementById('backtestModeLabel').textContent = isMemory ? 'Claude Memory Mode' : 'API History Mode';
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  var inp = document.getElementById('backtestDateInput');
+  if (inp) inp.addEventListener('change', function() { updateBacktestDateLabel(this.value); });
+});
+
+async function analyzeBacktest(topic) {
+  var date = document.getElementById('backtestDateInput').value;
+  if (!date) throw new Error('No backtest date selected');
+  var res = await fetch(BASE + '/api/backtest', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ date, topic })
+  });
+  if (!res.ok) throw new Error('Server error ' + res.status);
+  return res.json();
+}
+
+async function saveBacktestSnapshot(results, date) {
+  var bias = updateBias();
+  var snapshot = {
+    date: date, timestamp: new Date().toISOString(),
+    bias: bias.label, norm: bias.norm,
+    econ: results.econ||null, earn: results.earn||null,
+    premarket: results.premarket||null, news: results.news||null,
+    isBacktest: true
+  };
+  try {
+    await fetch(BASE + '/api/backtest/history/save', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dateKey: 'backtest-' + date, snapshot })
+    });
+  } catch(e) { console.error('Backtest save error:', e); }
+}
+
+function setCardConfidence(key, confidence) {
+  var footer = document.getElementById('pts-' + key).parentElement;
+  var existing = footer.querySelector('.confidence-badge');
+  if (existing) existing.remove();
+  if (confidence) {
+    var badge = document.createElement('span');
+    badge.className = 'confidence-badge conf-' + (confidence || 'estimated');
+    badge.textContent = confidence || 'estimated';
+    footer.appendChild(badge);
   }
 }
 
