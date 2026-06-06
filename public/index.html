@@ -723,7 +723,8 @@ async function loadMarketsBackground() {
         earn: lastResults && lastResults.earn ? lastResults.earn : null,
         premarket: lastResults && lastResults.premarket ? lastResults.premarket : null,
         news: lastResults && lastResults.news ? lastResults.news : null,
-        metaScore: lastMetaScore || null
+        metaScore: lastMetaScore || null,
+        regime: lastRegime || null
       })
     });
     var data = await res.json();
