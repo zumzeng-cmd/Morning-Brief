@@ -193,6 +193,48 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
   transition:all 0.15s; white-space:nowrap;
 }
 .regime-reset-btn:hover { border-color:var(--accent2); color:var(--accent2); }
+
+/* summary tab */
+.summary-panel { max-width: 780px; margin: 0 auto; padding: 0.5rem 0 2rem; }
+.summary-headline {
+  font-family: var(--font-display); font-size: 28px; letter-spacing: 2px;
+  color: var(--accent); line-height: 1.2; margin-bottom: 1.2rem;
+  text-transform: uppercase;
+}
+.summary-regime-line {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 1.4rem; padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.summary-bias-badge {
+  font-family: var(--font-display); font-size: 16px; letter-spacing: 1px;
+  padding: 3px 14px; border-radius: 3px;
+}
+.summary-bias-badge.bull { background: rgba(0,255,148,0.12); color: var(--bull); border: 1px solid rgba(0,255,148,0.3); }
+.summary-bias-badge.bear { background: rgba(255,68,68,0.12); color: var(--bear); border: 1px solid rgba(255,68,68,0.3); }
+.summary-bias-badge.neutral { background: rgba(255,184,0,0.10); color: var(--accent2); border: 1px solid rgba(255,184,0,0.3); }
+.summary-score { font-family: var(--font-display); font-size: 20px; color: var(--muted); }
+.summary-regime-tag { font-size: 10px; letter-spacing: 0.1em; padding: 2px 8px; border-radius: 2px; }
+.summary-body { display: flex; flex-direction: column; gap: 1.2rem; }
+.summary-para {
+  font-size: 14px; line-height: 1.85; color: #9DBFCF;
+  padding-left: 1rem; border-left: 2px solid var(--border);
+}
+.summary-para:first-child { border-left-color: var(--accent); color: #C8DCE8; }
+.summary-loading {
+  text-align: center; padding: 3rem 0;
+  color: var(--muted); font-size: 12px; letter-spacing: 0.1em;
+  font-style: italic;
+}
+.summary-refresh-btn {
+  width: 100%; padding: 12px; background: transparent;
+  border: 1px solid var(--border); color: var(--muted);
+  font-family: var(--font-display); font-size: 18px; letter-spacing: 3px;
+  border-radius: 4px; cursor: pointer; transition: all 0.2s; margin-top: 1.5rem;
+}
+.summary-refresh-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); background: rgba(0,255,148,0.04); }
+.summary-refresh-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.summary-timestamp { font-size: 10px; color: var(--muted); text-align: center; margin-top: 0.6rem; letter-spacing: 0.06em; }
 </style>
 </head>
 <body>
@@ -212,6 +254,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
   <div class="date-nav">
     <button class="dnbtn active" id="btnToday" onclick="switchToToday()">TODAY</button>
     <button class="dnbtn" id="btnMarkets" onclick="switchToMarkets()">MARKETS</button>
+    <button class="dnbtn" id="btnSummary" onclick="switchToSummary()">SUMMARY</button>
     <span class="mode-badge mode-live" id="modeBadge">LIVE</span>
     <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
       <input type="date" id="datePicker" style="display:none;background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:11px;padding:4px 8px;border-radius:3px;outline:none;" onchange="loadDate(this.value)"/>
@@ -306,6 +349,17 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
   <div class="footer-note" id="footerNote">Powered by Claude AI · Live data from FMP, Finnhub &amp; CNBC</div>
 
 
+  <!-- SUMMARY TAB -->
+  <div id="panelSummary" style="display:none;">
+    <div class="summary-panel">
+      <div id="summaryContent">
+        <div class="summary-loading">Run analysis first, then view the plain-English summary.</div>
+      </div>
+      <button class="summary-refresh-btn" id="summaryRefreshBtn" onclick="loadSummary()">&#9654; GENERATE SUMMARY</button>
+      <div class="summary-timestamp" id="summaryTimestamp"></div>
+    </div>
+  </div>
+
   <!-- MARKETS TAB -->
   <div id="panelMarkets" style="display:none;">
     <button class="markets-refresh-btn" id="marketsRefreshBtn" onclick="loadMarkets()">&#9654; GENERATE MARKET IMPLICATIONS</button>
@@ -362,6 +416,7 @@ function switchToToday(){
   // Show/hide panels only — never reset card data
   document.getElementById('datePicker').style.display='none';
   document.getElementById('panelMarkets').style.display='none';
+  document.getElementById('panelSummary').style.display='none';
   document.querySelector('.grid').style.display='grid';
   document.querySelector('.history-section').style.display='block';
   var rb=document.getElementById('rationaleBox');
@@ -380,9 +435,30 @@ function switchToHistory(){
   document.getElementById('overrideRow').style.opacity='0.3';
   document.getElementById('overrideRow').style.pointerEvents='none';
   document.getElementById('panelMarkets').style.display='none';
+  document.getElementById('panelSummary').style.display='none';
   document.querySelector('.grid').style.display='grid';
   document.querySelector('.history-section').style.display='block';
   document.getElementById('datePicker').value=todayKey();
+}
+
+function switchToSummary(){
+  historyMode=false;
+  document.getElementById('btnToday').classList.remove('active');
+  document.getElementById('btnMarkets').classList.remove('active');
+  document.getElementById('btnSummary').classList.add('active');
+  document.getElementById('btnHist').classList.remove('active');
+  document.getElementById('datePicker').style.display='none';
+  document.getElementById('modeBadge').textContent='SUMMARY';
+  document.getElementById('modeBadge').className='mode-badge mode-hist';
+  document.getElementById('runBtn').style.display='none';
+  document.getElementById('overrideRow').style.opacity='0.3';
+  document.getElementById('overrideRow').style.pointerEvents='none';
+  document.getElementById('panelSummary').style.display='block';
+  document.getElementById('panelMarkets').style.display='none';
+  document.querySelector('.grid').style.display='none';
+  document.querySelector('.history-section').style.display='none';
+  var rb=document.getElementById('rationaleBox'); if(rb) rb.style.display='none';
+  var regimeBar=document.getElementById('regimeBar'); if(regimeBar) regimeBar.style.display='none';
 }
 
 function switchToMarkets(){
@@ -407,6 +483,7 @@ function switchToMarkets(){
 
 function switchToTodayFull(){
   document.getElementById('panelMarkets').style.display='none';
+  document.getElementById('panelSummary').style.display='none';
   document.querySelector('.grid').style.display='grid';
   document.querySelector('.history-section').style.display='block';
 }
@@ -749,6 +826,9 @@ async function loadMarketsBackground() {
       marketsBtn.disabled = false;
       marketsBtn.textContent = '↺ REFRESH IMPLICATIONS';
     }
+
+    // Auto-generate summary in background after markets load
+    loadSummaryBackground();
   }
 }
 
@@ -836,6 +916,76 @@ var lastMarketResults = null;
 async function loadMarkets() {
   // Manual refresh — just delegates to the same background loader
   await loadMarketsBackground();
+}
+
+var lastSummaryData = null;
+
+function renderSummary(data) {
+  if (!data || !data.paragraphs) {
+    document.getElementById('summaryContent').innerHTML = '<div class="summary-loading">Could not generate summary. Run analysis first.</div>';
+    return;
+  }
+  var biasClass = 'neutral';
+  if (lastMetaScore) {
+    var ws = lastMetaScore.weightedScore || 0;
+    biasClass = ws >= 0.15 ? 'bull' : ws <= -0.15 ? 'bear' : 'neutral';
+  }
+  var biasLabel = lastMetaScore ? lastMetaScore.biasLabel : 'UNKNOWN';
+  var score = lastMetaScore ? (lastMetaScore.weightedScore >= 0 ? '+' : '') + lastMetaScore.weightedScore : '';
+  var regimeHtml = lastRegime && lastRegime.regime
+    ? '<span class="summary-regime-tag regime-' + lastRegime.regime + '">' + lastRegime.regime + '</span>'
+    : '';
+
+  var parasHtml = (data.paragraphs || []).map(function(p, i) {
+    return '<div class="summary-para">' + p + '</div>';
+  }).join('');
+
+  document.getElementById('summaryContent').innerHTML =
+    '<div class="summary-headline">' + (data.headline || 'Market Summary') + '</div>' +
+    '<div class="summary-regime-line">' +
+      '<span class="summary-bias-badge ' + biasClass + '">' + biasLabel + '</span>' +
+      '<span class="summary-score">' + score + '</span>' +
+      regimeHtml +
+    '</div>' +
+    '<div class="summary-body">' + parasHtml + '</div>';
+}
+
+async function loadSummary() {
+  await loadSummaryBackground();
+}
+
+async function loadSummaryBackground() {
+  var btn = document.getElementById('summaryRefreshBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⧖ GENERATING...'; }
+  document.getElementById('summaryContent').innerHTML = '<div class="summary-loading">Generating plain-English summary...</div>';
+
+  try {
+    var res = await fetch(BASE + '/api/summary', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        econ:      lastResults && lastResults.econ      ? lastResults.econ      : null,
+        earn:      lastResults && lastResults.earn      ? lastResults.earn      : null,
+        premarket: lastResults && lastResults.premarket ? lastResults.premarket : null,
+        news:      lastResults && lastResults.news      ? lastResults.news      : null,
+        metaScore: lastMetaScore  || null,
+        regime:    lastRegime     || null,
+        markets:   lastMarketResults || null
+      })
+    });
+    var data = await res.json();
+    if (data.error) throw new Error(data.error);
+    lastSummaryData = data;
+    renderSummary(data);
+    var now = new Date();
+    document.getElementById('summaryTimestamp').textContent =
+      'Generated at ' + now.toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit', hour12:true });
+  } catch(e) {
+    console.error('Summary error:', e);
+    document.getElementById('summaryContent').innerHTML = '<div class="summary-loading">Error generating summary. Run analysis first.</div>';
+  }
+
+  if (btn) { btn.disabled = false; btn.textContent = '↺ REFRESH SUMMARY'; }
 }
 
 async function resetRegime() {
