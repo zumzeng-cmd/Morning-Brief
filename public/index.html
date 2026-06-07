@@ -622,7 +622,35 @@ function setOverride(key,val,btn){
 function clearOverride(key,btn){
   overrides[key]=null;
   btn.parentElement.querySelectorAll('.obtn').forEach(b=>b.className='obtn');
-  updateBias();
+
+  // Restore AI score from last known result and re-fetch
+  var lastResult = lastResults && lastResults[key];
+  if (lastResult) {
+    // Restore the card to its AI state
+    scores[key] = parseFloat(lastResult.score) || 0;
+    setCardResult(key, lastResult);
+    // Recalculate pts with current dynamic weight
+    var w = (WEIGHTS && WEIGHTS[key]) || 2;
+    var pts = scores[key] * w;
+    var ptsEl = document.getElementById('pts-' + key);
+    if (ptsEl) {
+      ptsEl.textContent = (pts >= 0 ? '+' : '') + pts.toFixed(1);
+      ptsEl.className = 'card-pts ' + (pts > 0 ? 'pts-bull' : pts < 0 ? 'pts-bear' : 'pts-neu');
+    }
+    updateBias();
+  } else {
+    // No cached result — re-fetch from AI
+    setCardLoading(key);
+    analyze(key).then(function(result) {
+      if (lastResults) lastResults[key] = result;
+      scores[key] = parseFloat(result.score) || 0;
+      setCardResult(key, result);
+      updateBias();
+    }).catch(function(e) {
+      console.error('AI re-fetch error:', e);
+      setCardError(key);
+    });
+  }
 }
 
 function setCardLoading(key){
@@ -749,8 +777,20 @@ async function runAll(){
   btn.disabled=true;btn.textContent='⧖ ANALYZING...';
   document.getElementById('footerNote').textContent='Fetching live data from FMP, Finnhub & CNBC...';
   const keys=['econ','earn','premarket','news'];
+  // ── Clear stale data ──
+  lastResults={}; lastMetaScore=null; lastMarketResults=null; lastSummaryData=null;
+  document.getElementById('marketsContent').innerHTML='<div class="markets-empty">Run analysis first, then generate market implications.</div>';
+  document.getElementById('summaryContent').innerHTML='<div class="summary-loading">Run analysis first, then view the plain-English summary.</div>';
+  var rb2=document.getElementById('rationaleBox'); if(rb2) rb2.style.display='none';
   keys.forEach(k=>setCardLoading(k));
   const results={};
+
+  // ── Clear stale data on every fresh run ──
+  if (!backtestActive) {
+    // Reset markets and summary to loading state for live runs too
+    document.getElementById('marketsContent').innerHTML = '<div class="markets-empty">Updating market implications...</div>';
+    document.getElementById('summaryContent').innerHTML = '<div class="summary-loading">Generating summary...</div>';
+  }
 
   // ── Route: backtest or live ──
   if (backtestActive) {
@@ -758,7 +798,32 @@ async function runAll(){
     if (!btDate) { alert('Please select a backtest date.'); running=false; btn.disabled=false; btn.textContent='▶ RUN BACKTEST'; return; }
     updateBacktestDateLabel(btDate);
 
-    // Show progress on cards
+    // ── Clear ALL stale data before starting ──
+    lastResults = {}; lastMetaScore = null; lastMarketResults = null; lastSummaryData = null;
+    // Reset bias banner
+    document.getElementById('biasValue').textContent = 'AWAITING BACKTEST';
+    document.getElementById('biasValue').style.color = 'var(--accent2)';
+    document.getElementById('aggScore').textContent = '—';
+    document.getElementById('aggScore').style.color = 'var(--muted)';
+    document.getElementById('scoreBar').style.width = '50%';
+    document.getElementById('scoreBar').style.background = 'var(--border)';
+    // Reset AI weighting rationale
+    var rb = document.getElementById('rationaleBox');
+    var rt = document.getElementById('rationaleText');
+    if (rb) rb.style.display = 'none';
+    if (rt) rt.textContent = '';
+    // Reset markets tab
+    document.getElementById('marketsContent').innerHTML = '<div class="markets-empty">Run backtest to generate market implications.</div>';
+    var mBtn = document.getElementById('marketsRefreshBtn');
+    if (mBtn) { mBtn.disabled = false; mBtn.textContent = '▶ GENERATE MARKET IMPLICATIONS'; }
+    // Reset summary tab
+    document.getElementById('summaryContent').innerHTML = '<div class="summary-loading">Run backtest to generate summary.</div>';
+    var sBtn = document.getElementById('summaryRefreshBtn');
+    if (sBtn) { sBtn.disabled = false; sBtn.textContent = '▶ GENERATE SUMMARY'; }
+    var sumTs = document.getElementById('summaryTimestamp');
+    if (sumTs) sumTs.textContent = '';
+
+    // Show loading state on cards
     keys.forEach(function(k) { setCardLoading(k); });
     document.getElementById('footerNote').textContent = 'Running backtest for ' + btDate + ' — this may take 60-90 seconds...';
 
