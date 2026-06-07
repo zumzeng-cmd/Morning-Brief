@@ -1559,7 +1559,7 @@ app.get("/api/backtest/stream", async function(req, res) {
         max_tokens: 1000,
         temperature: 0,
         system: "You are a historical market data analyst. The date being analyzed is " + date + " (backtest mode). " +
-          "CRITICAL: Reply ONLY with raw JSON with fields: signal (bull/bear/neutral), summary (2 sentences), score (1/0/-1), guidance (null), confidence (confirmed/approximate/estimated).",
+          "CRITICAL: Reply ONLY with raw JSON with fields: signal (bull/bear/neutral), summary (MAXIMUM 2 sentences — be concise), score (1/0/-1), guidance (null), confidence (confirmed/approximate/estimated). Do NOT write more than 2 sentences in the summary field.",
         messages: [{ role: "user", content: prompt + (rawData ? "\n\nDATA:\n" + rawData : "") }]
       };
       if (useSearch) body.tools = [{ type: "web_search_20250305", name: "web_search" }];
@@ -1590,7 +1590,7 @@ app.get("/api/backtest/stream", async function(req, res) {
           });
         });
         r.on("error", reject);
-        r.setTimeout(120000, () => { r.destroy(); reject(new Error("Timeout on " + topic)); });
+        r.setTimeout(150000, () => { r.destroy(); reject(new Error("Timeout on " + topic)); });
         r.write(payload);
         r.end();
       });
@@ -1679,7 +1679,7 @@ app.get("/api/backtest/stream", async function(req, res) {
       "NEWS: " + results.news.signal.toUpperCase() + " | " + results.news.summary
     ].join("\n");
     const sumBody = { model:"claude-haiku-4-5-20251001", max_tokens:800, temperature:0,
-      system:"You are a clear, friendly market commentator. CRITICAL: Reply ONLY with raw JSON, no markdown. This is a historical backtest for " + date + " — write in past tense.",
+      system:"You are a clear, friendly market commentator. CRITICAL: Reply ONLY with raw JSON, no markdown. This is a historical backtest for " + date + " — write in past tense. Each paragraph must be 2-3 sentences maximum. Be concise and direct.",
       messages:[{ role:"user", content: SUMMARY_PROMPT + "\n\nDATA:\n" + summaryContext }] };
     const sumPayload = JSON.stringify(sumBody);
     const sumHeaders = { "Content-Type":"application/json","Content-Length":Buffer.byteLength(sumPayload),"x-api-key":process.env.ANTHROPIC_API_KEY,"anthropic-version":"2023-06-01" };
