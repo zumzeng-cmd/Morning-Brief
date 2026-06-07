@@ -762,97 +762,113 @@ async function runAll(){
     keys.forEach(function(k) { setCardLoading(k); });
     document.getElementById('footerNote').textContent = 'Running backtest for ' + btDate + ' — this may take 60-90 seconds...';
 
-    // ── SSE streaming backtest ──
-    await new Promise(function(resolve) {
-      var url = BASE + '/api/backtest/stream?date=' + encodeURIComponent(btDate);
-      var es = new EventSource(url);
-
-      es.addEventListener('status', function(e) {
-        var d = JSON.parse(e.data);
-        document.getElementById('footerNote').textContent = d.message;
+    // ── Fire-and-poll backtest ──
+    // Start the job (returns immediately with jobId)
+    // Then poll every 5 seconds until done
+    var jobId = null;
+    try {
+      var startRes = await fetch(BASE + '/api/backtest/start', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: btDate })
       });
+      var startData = await startRes.json();
+      if (startData.error) throw new Error(startData.error);
+      jobId = startData.jobId;
+    } catch(e) {
+      keys.forEach(function(k) { setCardError(k); });
+      document.getElementById('footerNote').textContent = 'Backtest failed to start: ' + e.message;
+      running = false; btn.disabled = false; btn.textContent = '↺ RUN BACKTEST';
+      return;
+    }
 
-      es.addEventListener('cards', function(e) {
-        var d = JSON.parse(e.data);
-        var btResults = d.results || {};
+    // Poll until done
+    function applyBacktestResult(btData) {
+      var btResults = btData.results || {};
+      ['econ','earn','premarket','news'].forEach(function(k) {
+        if (btResults[k] && btResults[k].summary && !btResults[k].summary.startsWith('Could not')) {
+          setCardResult(k, btResults[k]);
+          setCardConfidence(k, btResults[k].confidence || 'estimated');
+          scores[k] = parseFloat(btResults[k].score) || 0;
+        } else { setCardError(k); }
+      });
+      lastResults = btResults;
+
+      var btMeta = btData.metaScore;
+      if (btMeta && btMeta.weights) {
+        lastMetaScore = btMeta; WEIGHTS = btMeta.weights;
+        var btRationaleBox = document.getElementById('rationaleBox');
+        var btRationaleText = document.getElementById('rationaleText');
+        if (btRationaleBox) btRationaleBox.style.display = 'flex';
         ['econ','earn','premarket','news'].forEach(function(k) {
-          if (btResults[k]) {
-            setCardResult(k, btResults[k]);
-            setCardConfidence(k, btResults[k].confidence || 'estimated');
-            scores[k] = parseFloat(btResults[k].score) || 0;
-          } else { setCardError(k); }
+          var w = btMeta.weights[k]||1; var stars = Array(w+1).join('★');
+          var wtEl = document.getElementById('wt-'+k);
+          if (wtEl) wtEl.textContent = 'Weight: '+w+'×  '+stars;
+          var sc = scores[k]||0; var pts = sc*w;
+          var ptsEl = document.getElementById('pts-'+k);
+          if (ptsEl) { ptsEl.textContent=(pts>=0?'+':'')+pts.toFixed(1); ptsEl.className='card-pts '+(pts>0?'pts-bull':pts<0?'pts-bear':'pts-neu'); }
         });
-        lastResults = btResults;
-      });
+        var sig = (btMeta.signal||'neutral').toLowerCase();
+        var color = sig==='bull'?'#7AE89A':sig==='bear'?'#E87A7A':'var(--accent2)';
+        document.getElementById('biasValue').textContent = btMeta.biasLabel||'MIXED / NEUTRAL';
+        document.getElementById('biasValue').style.color = color;
+        var ws = parseFloat(btMeta.weightedScore)||0;
+        document.getElementById('aggScore').textContent = (ws>=0?'+':'')+ws.toFixed(1);
+        document.getElementById('aggScore').style.color = color;
+        var pct = ((Math.max(-1,Math.min(1,ws))+1)/2*100).toFixed(1);
+        document.getElementById('scoreBar').style.width = pct+'%'; document.getElementById('scoreBar').style.background = color;
+        if (btRationaleText) btRationaleText.textContent = btMeta.rationale||'';
+      }
+      if (btData.markets) {
+        lastMarketResults = btData.markets;
+        var mHtml = '';
+        mHtml += renderMarketsSection('EQUITIES',    {ES:1,NQ:1,YM:1,RTY:1}, btData.markets.equities);
+        mHtml += renderMarketsSection('METALS',      {GC:1,SI:1,HG:1,PL:1},  btData.markets.metals);
+        mHtml += renderMarketsSection('ENERGIES',    {CL:1,NG:1},             btData.markets.energies);
+        mHtml += renderMarketsSection('DOLLAR INDEX',{DXY:1},                 btData.markets.dxy);
+        document.getElementById('marketsContent').innerHTML = mHtml||'<div class="markets-empty">No market data.</div>';
+        var mBtn = document.getElementById('marketsRefreshBtn');
+        if (mBtn) { mBtn.disabled=false; mBtn.textContent='↺ REFRESH IMPLICATIONS'; }
+      }
+      if (btData.summary) {
+        lastSummaryData = btData.summary; renderSummary(btData.summary);
+        var sumTs = document.getElementById('summaryTimestamp');
+        if (sumTs) sumTs.textContent = 'Backtest analysis for ' + btDate;
+        var sumBtn = document.getElementById('summaryRefreshBtn');
+        if (sumBtn) { sumBtn.disabled=false; sumBtn.textContent='↺ REFRESH SUMMARY'; }
+      }
+    }
 
-      es.addEventListener('metascore', function(e) {
-        var d = JSON.parse(e.data);
-        var btMeta = d.metaScore;
-        if (btMeta && btMeta.weights) {
-          lastMetaScore = btMeta; WEIGHTS = btMeta.weights;
-          var btRationaleBox = document.getElementById('rationaleBox');
-          var btRationaleText = document.getElementById('rationaleText');
-          if (btRationaleBox) btRationaleBox.style.display = 'flex';
-          ['econ','earn','premarket','news'].forEach(function(k) {
-            var w = btMeta.weights[k]||1; var stars = Array(w+1).join('★');
-            var wtEl = document.getElementById('wt-'+k);
-            if (wtEl) wtEl.textContent = 'Weight: '+w+'×  '+stars;
-            var sc = scores[k]||0; var pts = sc*w;
-            var ptsEl = document.getElementById('pts-'+k);
-            if (ptsEl) { ptsEl.textContent=(pts>=0?'+':'')+pts.toFixed(1); ptsEl.className='card-pts '+(pts>0?'pts-bull':pts<0?'pts-bear':'pts-neu'); }
+    await new Promise(function(resolve) {
+      var pollCount = 0;
+      var maxPolls = 36; // 36 × 5s = 3 minutes max
+      function poll() {
+        pollCount++;
+        fetch(BASE + '/api/backtest/poll/' + jobId)
+          .then(function(r) { return r.json(); })
+          .then(function(d) {
+            document.getElementById('footerNote').textContent = 'Backtest running: ' + (d.progress || '...') + ' (' + (d.step||0) + '/6)';
+            if (d.status === 'done' && d.result) {
+              applyBacktestResult(d.result);
+              resolve();
+            } else if (d.status === 'error') {
+              console.error('Backtest job error:', d.error);
+              keys.forEach(function(k) { setCardError(k); });
+              resolve();
+            } else if (pollCount >= maxPolls) {
+              console.warn('Backtest polling timed out');
+              if (d.partialResults) applyBacktestResult({ results: d.partialResults, metaScore: null, markets: null, summary: null });
+              resolve();
+            } else {
+              setTimeout(poll, 5000);
+            }
+          })
+          .catch(function(e) {
+            console.error('Poll error:', e);
+            if (pollCount < maxPolls) setTimeout(poll, 5000);
+            else resolve();
           });
-          var sig = (btMeta.signal||'neutral').toLowerCase();
-          var color = sig==='bull'?'#7AE89A':sig==='bear'?'#E87A7A':'var(--accent2)';
-          document.getElementById('biasValue').textContent = btMeta.biasLabel||'MIXED / NEUTRAL';
-          document.getElementById('biasValue').style.color = color;
-          var ws = parseFloat(btMeta.weightedScore)||0;
-          document.getElementById('aggScore').textContent = (ws>=0?'+':'')+ws.toFixed(1);
-          document.getElementById('aggScore').style.color = color;
-          var pct = ((Math.max(-1,Math.min(1,ws))+1)/2*100).toFixed(1);
-          document.getElementById('scoreBar').style.width = pct+'%';
-          document.getElementById('scoreBar').style.background = color;
-          if (btRationaleText) btRationaleText.textContent = btMeta.rationale||'';
-        }
-      });
-
-      es.addEventListener('markets', function(e) {
-        var d = JSON.parse(e.data);
-        if (d.markets) {
-          lastMarketResults = d.markets;
-          var mHtml = '';
-          mHtml += renderMarketsSection('EQUITIES',    {ES:1,NQ:1,YM:1,RTY:1}, d.markets.equities);
-          mHtml += renderMarketsSection('METALS',      {GC:1,SI:1,HG:1,PL:1},  d.markets.metals);
-          mHtml += renderMarketsSection('ENERGIES',    {CL:1,NG:1},             d.markets.energies);
-          mHtml += renderMarketsSection('DOLLAR INDEX',{DXY:1},                 d.markets.dxy);
-          document.getElementById('marketsContent').innerHTML = mHtml||'<div class="markets-empty">No market data.</div>';
-          var mBtn = document.getElementById('marketsRefreshBtn');
-          if (mBtn) { mBtn.disabled=false; mBtn.textContent='↺ REFRESH IMPLICATIONS'; }
-        }
-      });
-
-      es.addEventListener('summary', function(e) {
-        var d = JSON.parse(e.data);
-        if (d.summary) {
-          lastSummaryData = d.summary; renderSummary(d.summary);
-          var sumTs = document.getElementById('summaryTimestamp');
-          if (sumTs) sumTs.textContent = 'Backtest analysis for ' + btDate;
-          var sumBtn = document.getElementById('summaryRefreshBtn');
-          if (sumBtn) { sumBtn.disabled=false; sumBtn.textContent='↺ REFRESH SUMMARY'; }
-        }
-      });
-
-      es.addEventListener('done', function(e) {
-        es.close(); resolve();
-      });
-
-      es.addEventListener('error', function(e) {
-        console.error('SSE error:', e);
-        keys.forEach(function(k) { setCardError(k); });
-        es.close(); resolve();
-      });
-
-      // Safety timeout — close after 3 minutes regardless
-      setTimeout(function() { es.close(); resolve(); }, 180000);
+      }
+      setTimeout(poll, 3000); // first poll after 3s
     });
 
     document.getElementById('modeBadge').textContent = 'BACKTEST • ' + btDate;
