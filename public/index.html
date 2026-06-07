@@ -617,6 +617,27 @@ function setOverride(key,val,btn){
   btn.parentElement.querySelectorAll('.obtn').forEach(b=>b.className='obtn');
   btn.className='obtn active-'+(val==='bull'?'bull':val==='bear'?'bear':'neu');
   scores[key]=val==='bull'?1:val==='bear'?-1:0;
+
+  // Update signal pill on card
+  var sigEl = document.getElementById('sig-'+key);
+  if (sigEl) {
+    sigEl.textContent = val==='bull'?'BULLISH':val==='bear'?'BEARISH':'NEUTRAL';
+    sigEl.className = 'card-sig '+(val==='bull'?'sig-bull':val==='bear'?'sig-bear':'sig-neu');
+  }
+
+  // Update pts display with current dynamic weight
+  var w = (WEIGHTS && WEIGHTS[key]) || 2;
+  var pts = scores[key] * w;
+  var ptsEl = document.getElementById('pts-'+key);
+  if (ptsEl) {
+    ptsEl.textContent = (pts>=0?'+':'')+pts.toFixed(1);
+    ptsEl.className = 'card-pts '+(pts>0?'pts-bull':pts<0?'pts-bear':'pts-neu');
+  }
+
+  // Update card border
+  var cardEl = document.getElementById('card-'+key);
+  if (cardEl) cardEl.className = 'card '+(val==='bull'?'bull':val==='bear'?'bear':'');
+
   updateBias();
 }
 function clearOverride(key,btn){
