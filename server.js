@@ -1474,6 +1474,265 @@ app.post("/api/backtest", async function(req, res) {
   }
 });
 
+
+// ── Backtest full endpoint ────────────────────────────────────
+// Runs all 4 topics in parallel, then meta-score, then markets + summary.
+// Single request to avoid Render's 30s per-request timeout on sequential calls.
+app.post("/api/backtest/full", async function(req, res) {
+  const { date } = req.body;
+  if (!date) return res.status(400).json({ error: "Missing date" });
+  if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ error: "API key not set" });
+
+  console.log("Backtest/full starting for:", date);
+
+  // Helper: call /api/backtest for a single topic internally (reuse logic)
+  async function runTopic(topic) {
+    const targetDate = new Date(date);
+    const isMemoryMode = targetDate <= MEMORY_CUTOFF;
+    const FMP_KEY = process.env.FMP_API_KEY || "WQMcZiIIJ1rarvN3puluUNQoGXFdvkjg";
+    const prevDate = new Date(targetDate);
+    prevDate.setDate(prevDate.getDate() - 1);
+    const prevStr = prevDate.toISOString().slice(0, 10);
+
+    let prompt, rawData, useSearch = false;
+
+    if (isMemoryMode) {
+      prompt = buildMemoryPrompt(topic, date);
+      rawData = null;
+      useSearch = true;
+    } else {
+      if (topic === "econ") {
+        try {
+          const raw = await fetchUrl("https://financialmodelingprep.com/stable/economic-calendar?from=" + date + "&to=" + date + "&apikey=" + FMP_KEY);
+          rawData = "HISTORICAL ECONOMIC CALENDAR FOR " + date + ":\n" + raw;
+        } catch(e) { rawData = null; }
+        const regimeForDate = "Use the correct market regime for " + date + " based on Fed policy and inflation at that time.";
+        prompt = ECON_PROMPT.replace("REGIME_PLACEHOLDER", regimeForDate);
+        if (!rawData) { useSearch = true; }
+      } else if (topic === "earn") {
+        try {
+          const [todayRaw, yestRaw] = await Promise.all([
+            fetchUrl("https://financialmodelingprep.com/stable/earnings-calendar?from=" + date + "&to=" + date + "&apikey=" + FMP_KEY),
+            fetchUrl("https://financialmodelingprep.com/stable/earnings-calendar?from=" + prevStr + "&to=" + prevStr + "&apikey=" + FMP_KEY)
+          ]);
+          rawData = "HISTORICAL EARNINGS FOR " + prevStr + "-" + date + ":\n" + yestRaw + "\n" + todayRaw;
+        } catch(e) { rawData = null; }
+        prompt = EARN_PROMPT + " CURRENT TIME (ET): 09:30 AM. BACKTEST DATE: " + date + ".";
+        if (!rawData) { useSearch = true; }
+      } else if (topic === "premarket") {
+        rawData = await fetchHistoricalPremarket(date);
+        prompt = PREMARKET_PROMPT;
+        if (!rawData) { prompt = buildMemoryPrompt("premarket", date); useSearch = true; }
+      } else if (topic === "news") {
+        prompt = buildMemoryPrompt("news", date);
+        rawData = null;
+        useSearch = true;
+      }
+    }
+
+    const body = {
+      model: "claude-sonnet-4-6",
+      max_tokens: 1000,
+      temperature: 0,
+      system: "You are a historical market data analyst. The date being analyzed is " + date + " (backtest mode). " +
+        "CRITICAL: Reply ONLY with raw JSON with fields: signal (bull/bear/neutral), summary (2 sentences), score (1/0/-1), guidance (null), confidence (confirmed/approximate/estimated). " +
+        "confidence: confirmed = verified from data or search, approximate = recalled from training, estimated = inferred.",
+      messages: [{ role: "user", content: prompt + (rawData ? "\n\nDATA:\n" + rawData : "") }]
+    };
+    if (useSearch) body.tools = [{ type: "web_search_20250305", name: "web_search" }];
+
+    const payload = JSON.stringify(body);
+    const headers = {
+      "Content-Type": "application/json",
+      "Content-Length": Buffer.byteLength(payload),
+      "x-api-key": process.env.ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01"
+    };
+    if (useSearch) headers["anthropic-beta"] = "web-search-2025-03-05";
+
+    return new Promise((resolve, reject) => {
+      const options = { hostname: "api.anthropic.com", path: "/v1/messages", method: "POST", headers };
+      const req2 = https.request(options, r => {
+        let raw = "";
+        r.on("data", c => raw += c);
+        r.on("end", () => {
+          try {
+            const parsed = JSON.parse(raw);
+            if (parsed.error) return reject(new Error(parsed.error.message));
+            const text = (parsed.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
+            const out = JSON.parse(text.replace(/```json|```/g, "").trim());
+            if (!out.hasOwnProperty("guidance")) out.guidance = null;
+            if (!out.hasOwnProperty("confidence")) out.confidence = "estimated";
+            out.backtestMode = isMemoryMode ? "memory" : "api";
+            resolve(out);
+          } catch(e) { reject(new Error("Parse error: " + e.message)); }
+        });
+      });
+      req2.on("error", reject);
+      req2.setTimeout(90000, () => { req2.destroy(); reject(new Error("Timeout on " + topic)); });
+      req2.write(payload);
+      req2.end();
+    });
+  }
+
+  try {
+    // ── Round 1: all 4 topics in parallel ──
+    console.log("Backtest/full Round 1: running 4 topics in parallel...");
+    const [econ, earn, premarket, news] = await Promise.allSettled([
+      runTopic("econ"), runTopic("earn"), runTopic("premarket"), runTopic("news")
+    ]);
+
+    const results = {
+      econ:      econ.status      === "fulfilled" ? econ.value      : { signal:"neutral", score:0, summary:"Could not fetch econ data for this date.", guidance:null, confidence:"estimated" },
+      earn:      earn.status      === "fulfilled" ? earn.value      : { signal:"neutral", score:0, summary:"Could not fetch earnings data for this date.", guidance:null, confidence:"estimated" },
+      premarket: premarket.status === "fulfilled" ? premarket.value : { signal:"neutral", score:0, summary:"Could not fetch premarket data for this date.", guidance:null, confidence:"estimated" },
+      news:      news.status      === "fulfilled" ? news.value      : { signal:"neutral", score:0, summary:"Could not fetch news data for this date.", guidance:null, confidence:"estimated" }
+    };
+    console.log("Backtest/full Round 1 complete:", Object.keys(results).map(k => k + ":" + results[k].signal).join(", "));
+
+    // ── Round 2: meta-score ──
+    console.log("Backtest/full Round 2: meta-score...");
+    const cardScores = {
+      econ:      parseFloat(results.econ.score)      || 0,
+      earn:      parseFloat(results.earn.score)      || 0,
+      premarket: parseFloat(results.premarket.score) || 0,
+      news:      parseFloat(results.news.score)      || 0
+    };
+
+    // Call meta-score via Claude
+    const metaContext = [
+      "BACKTEST DATE: " + date,
+      "ECON: signal=" + results.econ.signal + ", score=" + results.econ.score + ", summary=" + results.econ.summary,
+      "EARNINGS: signal=" + results.earn.signal + ", score=" + results.earn.score + ", summary=" + results.earn.summary,
+      "PRE-MARKET: signal=" + results.premarket.signal + ", score=" + results.premarket.score + ", summary=" + results.premarket.summary,
+      "MARKET NEWS: signal=" + results.news.signal + ", score=" + results.news.score + ", summary=" + results.news.summary,
+    ].join("\n");
+
+    const metaBody = {
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 400,
+      temperature: 0,
+      system: "You are a futures trader bias engine. CRITICAL: Reply ONLY with raw JSON, no markdown, no backticks.",
+      messages: [{ role: "user", content: META_PROMPT + "\n\nDATA:\n" + metaContext }]
+    };
+    const metaPayload = JSON.stringify(metaBody);
+    const metaHeaders = {
+      "Content-Type": "application/json",
+      "Content-Length": Buffer.byteLength(metaPayload),
+      "x-api-key": process.env.ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01"
+    };
+
+    let metaScore = null;
+    try {
+      const metaRaw = await new Promise((resolve, reject) => {
+        const opts = { hostname: "api.anthropic.com", path: "/v1/messages", method: "POST", headers: metaHeaders };
+        const mReq = https.request(opts, r => {
+          let d = "";
+          r.on("data", c => d += c);
+          r.on("end", () => resolve(d));
+        });
+        mReq.on("error", reject);
+        mReq.setTimeout(30000, () => { mReq.destroy(); reject(new Error("Meta-score timeout")); });
+        mReq.write(metaPayload);
+        mReq.end();
+      });
+      const metaParsed = JSON.parse(metaRaw);
+      const metaText = (metaParsed.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
+      const metaResult = JSON.parse(metaText.replace(/```json|```/g, "").trim());
+      const weights = metaResult.weights || { econ:3, earn:2, premarket:1, news:2 };
+      const totalWeight = Object.keys(weights).reduce((s, k) => s + (weights[k] || 0), 0);
+      const rawWeighted = Object.keys(weights).reduce((s, k) => s + (cardScores[k] || 0) * (weights[k] || 0), 0);
+      const weightedScore = totalWeight > 0 ? parseFloat((rawWeighted / totalWeight).toFixed(2)) : 0;
+      let signal, biasLabel;
+      if      (weightedScore >=  0.50) { signal = "bull";    biasLabel = "STRONGLY BULLISH"; }
+      else if (weightedScore >=  0.30) { signal = "bull";    biasLabel = "BULLISH"; }
+      else if (weightedScore >=  0.15) { signal = "bull";    biasLabel = "MILDLY BULLISH"; }
+      else if (weightedScore >  -0.15) { signal = "neutral"; biasLabel = "MIXED / NEUTRAL"; }
+      else if (weightedScore >  -0.30) { signal = "bear";    biasLabel = "MILDLY BEARISH"; }
+      else if (weightedScore >  -0.50) { signal = "bear";    biasLabel = "BEARISH"; }
+      else                             { signal = "bear";    biasLabel = "STRONGLY BEARISH"; }
+      metaScore = { weights, weightedScore, signal, biasLabel, rationale: metaResult.rationale || "" };
+      console.log("Backtest/full Round 2 complete: " + biasLabel + " (" + weightedScore + ")");
+    } catch(e) {
+      console.error("Backtest meta-score error:", e.message);
+      metaScore = { weights: { econ:3, earn:2, premarket:1, news:2 }, weightedScore: 0, signal: "neutral", biasLabel: "MIXED / NEUTRAL", rationale: "" };
+    }
+
+    // ── Round 3: markets + summary in parallel ──
+    console.log("Backtest/full Round 3: markets + summary in parallel...");
+    const activeRegime = null; // Regime not cached for historical dates
+    const marketScores = scoreInstruments(results.econ, results.earn, results.premarket, results.news, metaScore, activeRegime);
+
+    // Summary via Claude
+    const summaryContext = [
+      "BACKTEST DATE: " + date,
+      "REGIME: Historical — use correct regime for " + date,
+      "OVERALL BIAS: " + metaScore.biasLabel + " (score: " + metaScore.weightedScore + ")",
+      "RATIONALE: " + metaScore.rationale,
+      "ECON: " + results.econ.signal.toUpperCase() + " | " + results.econ.summary,
+      "EARNINGS: " + results.earn.signal.toUpperCase() + " | " + results.earn.summary,
+      "PRE-MARKET: " + results.premarket.signal.toUpperCase() + " | " + results.premarket.summary,
+      "NEWS: " + results.news.signal.toUpperCase() + " | " + results.news.summary,
+      "Equities: ES=" + marketScores.equities.ES.bias + ", NQ=" + marketScores.equities.NQ.bias,
+      "Metals: GC=" + marketScores.metals.GC.bias + ", SI=" + marketScores.metals.SI.bias,
+      "DXY: " + marketScores.dxy.DXY.bias,
+    ].join("\n");
+
+    const sumBody = {
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 800,
+      temperature: 0,
+      system: "You are a clear, friendly market commentator writing for a non-trader audience. CRITICAL: Reply ONLY with raw JSON, no markdown, no backticks. This is a historical backtest for " + date + " — write in past tense.",
+      messages: [{ role: "user", content: SUMMARY_PROMPT + "\n\nDATA:\n" + summaryContext }]
+    };
+    const sumPayload = JSON.stringify(sumBody);
+    const sumHeaders = {
+      "Content-Type": "application/json",
+      "Content-Length": Buffer.byteLength(sumPayload),
+      "x-api-key": process.env.ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01"
+    };
+
+    let summary = null;
+    try {
+      const sumRaw = await new Promise((resolve, reject) => {
+        const opts = { hostname: "api.anthropic.com", path: "/v1/messages", method: "POST", headers: sumHeaders };
+        const sReq = https.request(opts, r => {
+          let d = ""; r.on("data", c => d += c); r.on("end", () => resolve(d));
+        });
+        sReq.on("error", reject);
+        sReq.setTimeout(30000, () => { sReq.destroy(); reject(new Error("Summary timeout")); });
+        sReq.write(sumPayload);
+        sReq.end();
+      });
+      const sumParsed = JSON.parse(sumRaw);
+      const sumText = (sumParsed.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
+      summary = JSON.parse(sumText.replace(/```json|```/g, "").trim());
+    } catch(e) {
+      console.error("Backtest summary error:", e.message);
+      summary = { headline: "Historical Analysis — " + date, paragraphs: ["Summary generation failed. View individual cards for details."] };
+    }
+
+    // ── Save to backtest history ──
+    const btHistory = loadBacktestHistory();
+    btHistory["backtest-" + date] = {
+      date, isBacktest: true, savedAt: new Date().toISOString(),
+      bias: metaScore.biasLabel, norm: metaScore.weightedScore,
+      econ: results.econ, earn: results.earn,
+      premarket: results.premarket, news: results.news,
+      metaScore, summary
+    };
+    saveBacktestHistory(btHistory);
+    console.log("Backtest/full complete for", date);
+
+    res.json({ date, results, metaScore, markets: marketScores, summary });
+  } catch(e) {
+    console.error("Backtest/full error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Backtest history — stored separately from live history
 const BACKTEST_FILE = path.join(__dirname, "backtest-history.json");
 function loadBacktestHistory() {
