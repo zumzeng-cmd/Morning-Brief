@@ -540,8 +540,8 @@ function resetAllTabs() {
   var reg = document.getElementById('regimeBar');   if (reg) reg.style.display = 'none';
   document.getElementById('datePicker').style.display = 'none';
   document.getElementById('runBtn').style.display = 'none';
-  document.getElementById('overrideRow').style.opacity = '0.3';
-  document.getElementById('overrideRow').style.pointerEvents = 'none';
+  // Hide override row completely on non-Today tabs
+  document.getElementById('overrideRow').style.display = 'none';
 }
 
 function switchToToday(){
@@ -551,6 +551,8 @@ function switchToToday(){
   document.getElementById('modeBadge').textContent = 'LIVE';
   document.getElementById('modeBadge').className = 'mode-badge mode-live';
   document.getElementById('runBtn').style.display = '';
+  // Show override row only on Today tab
+  document.getElementById('overrideRow').style.display = '';
   document.getElementById('overrideRow').style.opacity = '1';
   document.getElementById('overrideRow').style.pointerEvents = '';
   document.querySelector('.grid').style.display = 'grid';
@@ -674,26 +676,39 @@ function clearOverride(key,btn){
   overrides[key]=null;
   btn.parentElement.querySelectorAll('.obtn').forEach(b=>b.className='obtn');
 
-  // Restore AI score from last known result and re-fetch
+  // Restore AI score from last known result
   var lastResult = lastResults && lastResults[key];
   if (lastResult) {
-    // Restore the card to its AI state
     scores[key] = parseFloat(lastResult.score) || 0;
     setCardResult(key, lastResult);
-    // Recalculate pts with current dynamic weight
-    var w = (WEIGHTS && WEIGHTS[key]) || 2;
+    // Restore pts display with current weight
+    var w = (WEIGHTS && WEIGHTS[key]) || 1;
     var pts = scores[key] * w;
     var ptsEl = document.getElementById('pts-' + key);
     if (ptsEl) {
       ptsEl.textContent = (pts >= 0 ? '+' : '') + pts.toFixed(1);
       ptsEl.className = 'card-pts ' + (pts > 0 ? 'pts-bull' : pts < 0 ? 'pts-bear' : 'pts-neu');
     }
+    // Restore signal pill
+    var sigEl = document.getElementById('sig-' + key);
+    if (sigEl) {
+      var sig = lastResult.signal || 'neutral';
+      sigEl.textContent = sig === 'bull' ? 'BULLISH' : sig === 'bear' ? 'BEARISH' : 'NEUTRAL';
+      sigEl.className = 'card-sig sig-' + sig;
+    }
+    // Restore card border
+    var cardEl = document.getElementById('card-' + key);
+    if (cardEl) {
+      var sig2 = lastResult.signal || 'neutral';
+      cardEl.className = 'card ' + (sig2 === 'bull' ? 'bull' : sig2 === 'bear' ? 'bear' : '');
+    }
     updateBias();
   } else {
     // No cached result — re-fetch from AI
     setCardLoading(key);
     analyze(key).then(function(result) {
-      if (lastResults) lastResults[key] = result;
+      if (!lastResults) lastResults = {};
+      lastResults[key] = result;
       scores[key] = parseFloat(result.score) || 0;
       setCardResult(key, result);
       updateBias();
@@ -834,20 +849,28 @@ async function runAll(){
   btn.disabled=true;btn.textContent='⧖ ANALYZING...';
   document.getElementById('footerNote').textContent='Fetching live data from FMP, Finnhub & CNBC...';
   const keys=['econ','earn','premarket','news'];
-  // ── Clear stale data ──
+  // ── Hard reset ALL data before new analysis ──
   lastResults={}; lastMetaScore=null; lastMarketResults=null; lastSummaryData=null;
-  document.getElementById('marketsContent').innerHTML='<div class="markets-empty">Run analysis first, then generate market implications.</div>';
-  document.getElementById('summaryContent').innerHTML='<div class="summary-loading">Run analysis first, then view the plain-English summary.</div>';
+  overrides={econ:null,earn:null,premarket:null,news:null};
+  // Reset override buttons
+  document.querySelectorAll('.obtn').forEach(function(b){ b.className='obtn'; });
+  // Reset bias banner
+  document.getElementById('biasValue').textContent='ANALYZING...';
+  document.getElementById('biasValue').style.color='var(--muted)';
+  document.getElementById('aggScore').textContent='—';
+  document.getElementById('aggScore').style.color='var(--muted)';
+  document.getElementById('scoreBar').style.width='50%';
+  document.getElementById('scoreBar').style.background='var(--border)';
+  // Reset rationale
   var rb2=document.getElementById('rationaleBox'); if(rb2) rb2.style.display='none';
+  var rt2=document.getElementById('rationaleText'); if(rt2) rt2.textContent='';
+  // Reset markets and summary
+  document.getElementById('marketsContent').innerHTML='<div class="markets-empty">Updating market implications...</div>';
+  document.getElementById('summaryContent').innerHTML='<div class="summary-loading">Generating summary...</div>';
+  var sumBtn=document.getElementById('summaryRefreshBtn'); if(sumBtn){ sumBtn.disabled=true; sumBtn.textContent='⧖ GENERATING...'; }
+  var sumTs=document.getElementById('summaryTimestamp'); if(sumTs) sumTs.textContent='';
   keys.forEach(k=>setCardLoading(k));
   const results={};
-
-  // ── Clear stale data on every fresh run ──
-  if (!backtestActive) {
-    // Reset markets and summary to loading state for live runs too
-    document.getElementById('marketsContent').innerHTML = '<div class="markets-empty">Updating market implications...</div>';
-    document.getElementById('summaryContent').innerHTML = '<div class="summary-loading">Generating summary...</div>';
-  }
 
   // ── Route: backtest or live ──
   if (backtestActive) {
