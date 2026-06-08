@@ -1441,10 +1441,12 @@ app.post("/api/markets", async function(req, res) {
       dxy:      merge(result.dxy,      scores.dxy)
     };
 
-    console.log("Markets result generated (deterministic scoring applied)");
+    console.log("Markets result generated:", JSON.stringify(Object.keys(finalMarkets)), "keys");
+    console.log("Markets equities:", finalMarkets.equities ? Object.keys(finalMarkets.equities).join(",") : "null");
     res.json(finalMarkets);
   } catch(e) {
     console.error("Markets error:", e.message);
+    console.error("Markets stack:", e.stack ? e.stack.slice(0,500) : "no stack");
     res.status(500).json({ error: e.message });
   }
 });
