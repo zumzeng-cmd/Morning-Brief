@@ -1268,7 +1268,7 @@ function renderMarketCard(ticker, data) {
   var sigClass = bias==='bull'?'sig-bull':bias==='bear'?'sig-bear':'sig-neu';
   var sigLabel = bias==='bull'?'BULLISH':bias==='bear'?'BEARISH':'NEUTRAL';
   var divergeBadge = data.divergence ? '<span class="diverge-badge">DIVERGING</span>' : '';
-  var keyLevel = data.keyLevel ? '<div class="market-keylevel">Watch:<span>'+data.keyLevel+'</span></div>' : '<div class="market-keylevel"></div>';
+  var keyLevel = ''; // keyLevel removed
 
   // Best setup banner
   var bestBanner = '';
@@ -1324,7 +1324,7 @@ function renderMarketCard(ticker, data) {
     '</div>' +
     priceRow +
     '<div class="market-body">'+(data.implication||'No data.')+'</div>' +
-    '<div class="market-footer">'+keyLevel+'</div>' +
+    '' +
   '</div>';
 }
 
