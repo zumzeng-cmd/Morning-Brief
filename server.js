@@ -1943,9 +1943,10 @@ async function fetchLivePrices() {
   const tdSymbols = MARKET_SYMBOLS.map(s => s.td).join(",");
   let tdMap = {};
   try {
-    const raw = await fetchUrl(
-      "https://api.twelvedata.com/quote?symbol=" + encodeURIComponent(tdSymbols) + "&apikey=" + TD_KEY
-    );
+    const tdUrl = "https://api.twelvedata.com/quote?symbol=" + encodeURIComponent(tdSymbols) + "&apikey=" + TD_KEY;
+    console.log("Twelve Data URL:", tdUrl.replace(TD_KEY, "***"));
+    const raw = await fetchUrl(tdUrl);
+    console.log("Twelve Data raw (first 300):", raw.slice(0, 300));
     const json = JSON.parse(raw);
     // Response is either { SYMBOL: {...} } for multiple or direct object for single
     const entries = Object.keys(json);
