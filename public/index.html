@@ -1156,6 +1156,8 @@ async function loadMarketsBackground() {
       })
     });
     var data = await res.json();
+    console.log('Markets API response keys:', Object.keys(data));
+    console.log('Markets equities:', data.equities ? Object.keys(data.equities) : 'null');
     if (data.error) throw new Error(data.error);
     lastMarketResults = data;
 
