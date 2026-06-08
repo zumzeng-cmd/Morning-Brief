@@ -1151,14 +1151,17 @@ const MARKETS_PROMPT = [
 // ── Deterministic instrument scoring ─────────────────────────
 // Derives all instrument bias/bestSetup/direction from card signals.
 // Never relies on Claude for directional decisions.
-function scoreInstruments(econ, earn, premarket, news, metaScore, regime) {
+function scoreInstruments(econ, earn, premarket, news, metaScore, regime, sessionOpen) {
   // ── Card signals (regime-adjusted) ──
   const econSig    = econ      ? econ.signal      : "neutral";
   const newsSig    = news      ? news.signal      : "neutral";
-  const preSig     = premarket ? premarket.signal : "neutral";
+  // After US open, premarket signal is zeroed — don't let overnight data
+  // drive commodity/instrument scoring once the session is live
+  const preSig     = (sessionOpen && premarket) ? "neutral" : (premarket ? premarket.signal : "neutral");
+  const preScore   = (sessionOpen && premarket) ? 0 : (premarket ? parseFloat(premarket.score) || 0 : 0);
   const econScore  = econ      ? parseFloat(econ.score)      || 0 : 0;
   const newsScore  = news      ? parseFloat(news.score)      || 0 : 0;
-  const preScore   = premarket ? parseFloat(premarket.score) || 0 : 0;
+  // preScore declared above with session-open check
   const earnScore  = earn      ? parseFloat(earn.score)      || 0 : 0;
   const overallWS  = metaScore ? parseFloat(metaScore.weightedScore) || 0 : 0;
 
@@ -1455,7 +1458,11 @@ app.post("/api/markets", async function(req, res) {
 
     // ── Merge Claude's text with server-side deterministic scores ──
     const activeRegime = regime || regimeCache; // prefer frontend-sent regime, fall back to server cache
-    const scores = scoreInstruments(econ, earn, premarket, news, metaScore, activeRegime);
+    // Determine if US session is open — premarket signal should not drive commodity scoring after open
+    const etNowSI = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
+    const etHourSI = etNowSI.getHours(); const etMinSI = etNowSI.getMinutes(); const etDaySI = etNowSI.getDay();
+    const sessionOpenSI = etDaySI >= 1 && etDaySI <= 5 && (etHourSI > 9 || (etHourSI === 9 && etMinSI >= 30));
+    const scores = scoreInstruments(econ, earn, premarket, news, metaScore, activeRegime, sessionOpenSI);
 
     function merge(claudeGroup, scoreGroup) {
       const out = {};
@@ -1984,7 +1991,7 @@ async function runBacktestJob(jobId, date) {
     } catch(e) { console.error("Job meta error:", e.message); }
 
     updateJob("Meta-score complete. Scoring markets...", 3);
-    const marketScores = scoreInstruments(results.econ, results.earn, results.premarket, results.news, metaScore, null);
+    const marketScores = scoreInstruments(results.econ, results.earn, results.premarket, results.news, metaScore, null, false); // backtest — no session-open zeroing
 
     // ── Round 3: summary ──
     updateJob("Generating plain-English summary...", 4);
