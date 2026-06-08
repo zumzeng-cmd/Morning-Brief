@@ -624,8 +624,12 @@ async function callClaudeWithRetry(prompt, data, useWebSearch) {
 // ── Prompts ───────────────────────────────────────────────────
 const ECON_PROMPT = [
   "From this economic calendar data, extract ONLY the following report types and IGNORE everything else.",
-  "INCLUDE ONLY: Monetary policy (Fed rate decisions, FOMC, Fed speeches, ECB/BOE/BOJ), Labor market (NFP, JOLTS, Jobless Claims, ADP, Unemployment Rate, Average Hourly Earnings), Inflation (CPI, Core CPI, PPI, Core PPI, PCE, Core PCE), Growth (GDP), Sentiment & Manufacturing (ISM Manufacturing, ISM Services, PMI, Consumer Confidence, UoM Sentiment), Energy (EIA Crude Oil Inventories, EIA Natural Gas Storage), London metals session (Gold, Silver, Copper, Platinum London fix or LME), Any HIGH or MEDIUM impact USD event.",
-  "EXCLUDE: Low impact events, non-USD data (except London metals).",
+  "TIER 1 (score these always): Fed rate decision, FOMC statement, NFP (Non-Farm Payrolls), CPI, Core CPI, PCE, Core PCE.",
+  "TIER 2 (score if released today): JOLTS, Initial Jobless Claims, Continuing Claims, ADP Employment, Unemployment Rate, Average Hourly Earnings, PPI, Core PPI.",
+  "TIER 3 (score only if no TIER 1 or TIER 2 data today): GDP, ISM Manufacturing, ISM Services, PMI, University of Michigan Sentiment, Consumer Confidence (Conference Board), EIA Crude Oil Inventories, EIA Natural Gas Storage.",
+  "USD ONLY RULE: ONLY score USD-denominated reports. Completely ignore ALL non-USD data — Japanese, European, Chinese, Australian, Canadian, UK or any other country's data is irrelevant regardless of impact label. The only exception is ECB, BOE, or BOJ rate decisions which move USD indirectly.",
+  "EXCLUDE ENTIRELY regardless of impact label or currency tag: Consumer Inflation Expectations, CB Employment Trends, NY Fed Consumer Expectations, Dallas Fed, Richmond Fed, Kansas Fed, Chicago PMI, Redbook, NFIB Small Business, Building Permits, Housing Starts, Existing Home Sales, New Home Sales, Pending Home Sales, Durable Goods Orders, Factory Orders, Wholesale Inventories, Trade Balance, Current Account, Treasury Budget, Baker Hughes Rig Count, any state-level data.",
+  "NO-DATA RULE: If the ONLY reports available today are from the EXCLUDE list, are non-USD, or are all LOW impact, score 0 neutral. Do NOT score a low-tier or non-USD miss as directional. State clearly that no actionable USD data was released today.",
   "For each included report: name, actual vs forecast, beat or miss.",
   "REGIME_PLACEHOLDER",
   "TIER 1 (dominates everything): Fed rate decision, FOMC, NFP, CPI, PCE. TIER 2 (high weight): JOLTS, Jobless Claims, ADP, Unemployment Rate, PPI. TIER 3 (medium): GDP, ISM, PMI, Sentiment. TIER 4 (lower): Oil/gas inventories, metals.",
