@@ -653,7 +653,7 @@ const ECON_PROMPT = [
   "\"laborStrong\":false," +           // NFP beat, jobless claims low, strong employment
   "\"laborWeak\":false," +             // NFP miss, jobless claims high, weak employment
   "\"chinaStimulus\":false," +         // PBOC action, Chinese stimulus, infrastructure spending, demand boost
-  "\"gF\":false," +           // Recession fears, demand destruction, global slowdown
+  "\"growthFears\":false," + // Recession fears, demand destruction, global slowdown
   "\"riskOn\":false," +                // Risk appetite rising, equities bid, safe havens sold
   "\"riskOff\":false" +                // Risk appetite falling, safe havens bid, equities sold
   "}}"
@@ -693,7 +693,7 @@ const EARN_PROMPT = [
   "\"laborStrong\":false," +           // NFP beat, jobless claims low, strong employment
   "\"laborWeak\":false," +             // NFP miss, jobless claims high, weak employment
   "\"chinaStimulus\":false," +         // PBOC action, Chinese stimulus, infrastructure spending, demand boost
-  "\"gF\":false," +           // Recession fears, demand destruction, global slowdown
+  "\"growthFears\":false," + // Recession fears, demand destruction, global slowdown
   "\"riskOn\":false," +                // Risk appetite rising, equities bid, safe havens sold
   "\"riskOff\":false" +                // Risk appetite falling, safe havens bid, equities sold
   "}}"
@@ -712,16 +712,19 @@ const PREMARKET_PROMPT = [
 ].join(" ");
 
 const NEWS_PROMPT = [
+  "You are scoring news for a DAY TRADER. The question is: what is moving markets RIGHT NOW during today's session — not what the structural macro backdrop is.",
   "From this CNBC markets page identify the most impactful stories for US index futures (NQ/ES) today.",
   "LEVEL 5 - MARKET SHOCK OVERRIDE (completely dominates all other signals): Active military conflict outbreak, emergency Fed rate decision, major bank failure, pandemic declaration, emergency executive order affecting markets, surprise nationalization, sweeping antitrust breakup of mega-cap, extreme overnight tariff (50%+), contested election causing constitutional crisis, surprise election outcome reversing expected policy. If Level 5 detected: score -1 AND include MARKET_SHOCK_OVERRIDE in summary.",
-  "LEVEL 4 - HIGHEST IMPACT (moves NQ 1%+ intraday): Fed surprise pivot, major geopolitical escalation, oil supply shock >5%, large tariff announcement.",
-  "LEVEL 3 - HIGH IMPACT: Fed speaker hawkish/dovish shift, Middle East escalation, trade action, regulatory ruling.",
+  "LEVEL 4 - HIGHEST IMPACT (moves NQ 1%+ intraday): Fed surprise pivot, major geopolitical escalation OR de-escalation, oil supply shock >5%, large tariff announcement, major war development.",
+  "LEVEL 3 - HIGH IMPACT: Fed speaker hawkish/dovish shift, Middle East escalation or ceasefire, trade action, regulatory ruling.",
   "LEVEL 2 - MEDIUM: Sector news, individual large-cap catalyst.",
   "LEVEL 1 - LOW (do not score): Routine analyst calls, minor company news.",
-  "TIEBREAKER RULE: If multiple stories conflict (e.g. hawkish rate narrative AND geopolitical tensions), score based on whichever has the LARGER index impact. A hot jobs report delaying Fed cuts = Level 3-4 bearish for NQ/ES. An oil price surge without supply shock = Level 2 at most. Do NOT score neutral just because two stories conflict — identify the dominant driver and score it.",
-  "HAWKISH RULE: If the dominant news is rate-cut delays, higher-for-longer Fed narrative, or yields rising on economic strength, score BEARISH (-1). This is unambiguous bearish for growth equities regardless of any positive geopolitical or commodity offsets.",
-  "IMPORTANT: Do NOT include level labels like Level 3 or Level 4 in your summary text. Write natural plain English.",
-  "Score: bull=1, bear=-1, neutral=0. Reserve neutral ONLY for days with genuinely no directional catalyst — not for days where competing stories exist.",
+  "FRESHNESS HIERARCHY — CRITICAL FOR DAY TRADING: Score based on what the market is trading TODAY, not stale carry-over narratives. Apply this priority order: (1) Events that broke SINCE the last US market close (overnight, weekend) take highest priority — the market has not yet priced these. (2) Events from TODAY's session take second priority. (3) Data or news from PRIOR trading sessions (yesterday, last week) is already priced in and should NOT dominate scoring. Example: If today is Monday and Iran announced a ceasefire over the weekend, that is FRESHER and MORE MARKET-MOVING than Friday's jobs data which traded all day Friday and was priced over the weekend. The jobs data becomes background context, not the primary driver.",
+  "GEOPOLITICAL DE-ESCALATION RULE: A major geopolitical resolution (ceasefire, end of hostilities, peace deal) is a BULLISH Level 4 catalyst for equities — it removes the risk premium that was suppressing markets. Score BULLISH even if a hawkish macro backdrop exists in older data. The de-escalation is new; the macro narrative is stale.",
+  "HAWKISH RULE: Rate-cut delay / higher-for-longer narrative scores BEARISH — BUT only if that narrative is the FRESHEST dominant catalyst. If a geopolitical resolution or other fresh Level 4+ event occurred more recently, the hawkish narrative is demoted to background context.",
+  "TIEBREAKER RULE: When two catalysts conflict, the FRESHER one wins. If both are equally fresh, the LARGER market mover wins.",
+  "IMPORTANT: Do NOT include level labels in your summary. Write natural plain English. State what is MOVING markets today specifically.",
+  "Score: bull=1, bear=-1, neutral=0. Reserve neutral ONLY for days with genuinely no fresh directional catalyst.",
   "CATALYST FLAGS: After scoring, you must also identify which specific catalysts are present in the data. Set each flag to true or false based on what you actually read — do not infer or assume. These flags drive commodity and instrument scoring downstream so accuracy matters. " +
   "JSON SCHEMA: {" +
   "\"signal\":\"bull|bear|neutral\"," +
@@ -740,7 +743,7 @@ const NEWS_PROMPT = [
   "\"laborStrong\":false," +           // NFP beat, jobless claims low, strong employment
   "\"laborWeak\":false," +             // NFP miss, jobless claims high, weak employment
   "\"chinaStimulus\":false," +         // PBOC action, Chinese stimulus, infrastructure spending, demand boost
-  "\"gF\":false," +           // Recession fears, demand destruction, global slowdown
+  "\"growthFears\":false," + // Recession fears, demand destruction, global slowdown
   "\"riskOn\":false," +                // Risk appetite rising, equities bid, safe havens sold
   "\"riskOff\":false" +                // Risk appetite falling, safe havens bid, equities sold
   "}}"
