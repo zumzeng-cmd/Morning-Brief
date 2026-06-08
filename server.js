@@ -206,6 +206,9 @@ async function fetchEarnings() {
   return "EARNINGS (yesterday=" + yestStr + " AMC, today=" + todayStr + "):\n" + lines.join("\n") + "\n\n" + nonGaapNote;
 }
 
+// Premarket cache — locks at 9:30am ET so US session doesn't contaminate overnight data
+var premarketCache = { data: null, lockedAt: null, dateKey: null };
+
 async function fetchPremarket() {
   const FINNHUB_KEY = process.env.FINNHUB_API_KEY || "d8gh1phr01qlgcujfjfgd8gh1phr01qlgcujfjg0";
 
@@ -214,6 +217,25 @@ async function fetchPremarket() {
   const etNow = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
   const dayOfWeek = etNow.getDay(); // 0=Sun, 6=Sat
   const hourET = etNow.getHours();
+  const minuteET = etNow.getMinutes();
+  const todayKey = etNow.toISOString().slice(0, 10);
+
+  // ── 9:30am lock: return cached data if US session is open ──
+  // Once US markets open, ETF proxies reflect US session moves, not overnight data
+  // Lock the premarket read at the moment US session begins
+  const usSessionOpen = (dayOfWeek >= 1 && dayOfWeek <= 5) &&
+    (hourET > 9 || (hourET === 9 && minuteET >= 30));
+
+  if (usSessionOpen) {
+    if (premarketCache.data && premarketCache.dateKey === todayKey) {
+      console.log("Premarket: US session open — returning locked snapshot from", premarketCache.lockedAt);
+      return premarketCache.data;
+    }
+    // No cache yet for today — this is the first call after open (e.g. user opened dashboard at 10am)
+    // Return null to trigger web search which can still find today's overnight data
+    console.log("Premarket: US session open, no cache for today — web search for overnight data");
+    return null;
+  }
 
   // Saturday all day — fully closed, return neutral immediately
   if (dayOfWeek === 6) {
@@ -318,7 +340,9 @@ async function fetchPremarket() {
       formatFutures(futures)
     ].join("\n\n");
 
-    console.log("Premarket: Finnhub data fetched successfully");
+    // Cache this ETF snapshot — will be locked at 9:30am for rest of day
+    premarketCache = { data: output, lockedAt: etNow.toTimeString().slice(0,5) + " ET", dateKey: todayKey };
+    console.log("Premarket: Finnhub data fetched and cached at", premarketCache.lockedAt);
     return output;
 
   } catch(e) {
@@ -830,8 +854,26 @@ app.post("/api/analyze", async function(req, res) {
 
     // Track last Sonnet web search time for rate limit management
     if (useSearch) global.lastSonnetCallMs = Date.now();
+    // Track last Sonnet web search time for rate limit management
+    if (useSearch) global.lastSonnetCallMs = Date.now();
     const result = await callClaudeWithRetry(prompt, rawData, useSearch);
     console.log("Result for " + topic + ":", JSON.stringify(result));
+
+    // Cache premarket result if US session is now open (lock it for the rest of the day)
+    if (topic === "premarket") {
+      const nowCache = new Date();
+      const etCache = new Date(nowCache.toLocaleString("en-US", { timeZone: "America/New_York" }));
+      const hourCache = etCache.getHours(); const minCache = etCache.getMinutes();
+      const dayCache = etCache.getDay();
+      const sessionOpenCache = dayCache >= 1 && dayCache <= 5 && (hourCache > 9 || (hourCache === 9 && minCache >= 30));
+      if (sessionOpenCache && result && result.signal) {
+        const todayKeyCache = etCache.toISOString().slice(0, 10);
+        // Store the analyzed result summary as cache so next call returns locked data
+        premarketCache = { data: result.summary || rawData, lockedAt: etCache.toTimeString().slice(0,5) + " ET", dateKey: todayKeyCache };
+        console.log("Premarket: result cached at open for rest of day");
+      }
+    }
+
     res.json(result);
   } catch(e) {
     console.error("Error for " + topic + ":", e.message);
@@ -1018,12 +1060,22 @@ function scoreInstruments(econ, earn, premarket, news, metaScore, regime) {
   const econText = ((econ ? econ.summary : "")).toLowerCase();
   const allText  = newsText + " " + econText;
 
+  // ── De-escalation detection — MUST come before crisis detection ──
+  // If the dominant narrative is resolution/de-escalation, crisis overrides are CANCELLED
+  const deEscalation = /ceasefire|de-escalat|end of operation|peace deal|truce|withdrawal|tensions eas|risk premium.*fad|premium.*unwind|premium.*dissipat|geopolit.*eas|geopolit.*resol|iran.*end|israel.*end|end.*military|hostilities.*end/.test(allText);
+
   // Oil-specific catalysts (supply shock = bull for CL regardless of macro)
-  const oilSupplyShock = /middle east|iran|israel|opec cut|supply shock|pipeline|strait of hormuz|houthi|saudi|oil supply|crude supply|production cut/.test(allText);
+  // De-escalation cancels the supply shock — geopolitical premium fading = bearish for CL
+  const oilSupplyShockActive = /middle east|iran|israel|opec cut|supply shock|pipeline|strait of hormuz|houthi|saudi|oil supply|crude supply|production cut/.test(allText);
+  const oilSupplyShock = oilSupplyShockActive && !deEscalation; // cancelled if de-escalating
+  const oilSupplyUnwind = oilSupplyShockActive && deEscalation; // premium FADING = bearish catalyst
   const oilDemandDestruction = /recession|demand destruction|demand collapse|global slowdown/.test(allText);
 
   // Gold-specific catalysts
-  const geopoliticalCrisis = /war|military|attack|invasion|missile|escalat|crisis|conflict|iran|russia|north korea|terror/.test(allText);
+  // De-escalation cancels geopolitical safe-haven bid
+  const geopoliticalCrisisActive = /war|military|attack|invasion|missile|escalat|crisis|conflict|iran|russia|north korea|terror/.test(allText);
+  const geopoliticalCrisis = geopoliticalCrisisActive && !deEscalation; // active crisis only
+  const geopoliticalUnwind = geopoliticalCrisisActive && deEscalation;  // risk premium fading = bear for GC
   const inflationFears = /inflation|cpi|pce|price pressure|inflationary/.test(allText);
   const fedPivot = /fed cut|rate cut|pivot|dovish|easing|accommodative/.test(allText);
 
@@ -1097,28 +1149,32 @@ function scoreInstruments(econ, earn, premarket, news, metaScore, regime) {
   const equityBias = { ES: sig(esScore), NQ: sig(nqScore), YM: sig(ymScore), RTY: sig(rtyScore) };
 
   // ── METALS ──
-  // GC: geopolitical crisis is a BULLISH override — safe-haven demand overrides
-  // dollar headwind when there is active military conflict or crisis
+  // GC: geopolitical unwind is an explicit BEARISH catalyst — safe-haven premium fading
+  // De-escalation overrides the riskOff/riskOn macro logic for gold specifically
   let gcBias;
-  if (geopoliticalCrisis && riskOff && !dollarStrong)  gcBias = "bull";    // crisis + no dollar headwind = strong safe-haven bid
-  else if (geopoliticalCrisis && dollarStrong && yieldsRising) gcBias = "neutral"; // crisis bids gold but dollar/yields cap it
-  else if (geopoliticalCrisis && dollarStrong)          gcBias = "neutral"; // competing forces with crisis premium
-  else if (inflationFears && !dollarStrong)             gcBias = "bull";    // inflation hedge with no dollar headwind
-  else if (fedPivot)                                    gcBias = "bull";    // dovish Fed = gold bull
-  else if (dollarStrong && yieldsRising)                gcBias = "bear";    // yields + dollar dominate — no crisis
-  else if (dollarStrong && riskOff)                     gcBias = "neutral"; // competing forces cancel
-  else if (riskOff && !dollarStrong)                    gcBias = "bull";    // safe-haven bid with no dollar headwind
+  if (geopoliticalUnwind && riskOn)                     gcBias = "bear";    // crisis over + risk-on = double pressure on gold
+  else if (geopoliticalUnwind && !riskOff)              gcBias = "bear";    // safe-haven bid unwinding
+  else if (geopoliticalUnwind && riskOff)               gcBias = "neutral"; // unwind but some risk-off remains — mixed
+  else if (geopoliticalCrisis && riskOff && !dollarStrong) gcBias = "bull"; // active crisis + no dollar headwind
+  else if (geopoliticalCrisis && dollarStrong && yieldsRising) gcBias = "neutral"; // crisis vs dollar/yields
+  else if (geopoliticalCrisis && dollarStrong)          gcBias = "neutral"; // competing forces
+  else if (inflationFears && !dollarStrong)             gcBias = "bull";    // inflation hedge
+  else if (fedPivot)                                    gcBias = "bull";    // dovish Fed
+  else if (dollarStrong && yieldsRising)                gcBias = "bear";    // yields + dollar dominate
+  else if (dollarStrong && riskOff)                     gcBias = "neutral"; // competing forces
+  else if (riskOff && !dollarStrong)                    gcBias = "bull";    // safe-haven bid
   else if (dollarWeak || yieldsFalling)                 gcBias = "bull";    // dollar/yield tailwind
   else if (riskOn && dollarStrong)                      gcBias = "bear";    // risk-on + strong dollar
   else                                                  gcBias = "neutral";
 
-  // SI: follows GC but amplified by industrial demand
-  // Geopolitical crisis adds safe-haven bid like gold but industrial component pulls it back
+  // SI: follows GC direction + amplified by industrial demand
+  // Geopolitical unwind hurts silver more than gold (both precious AND industrial demand weakens)
   let siBias;
-  if (gcBias === "bear")                                                siBias = "bear";
-  else if (gcBias === "bull" && industrialDemandPositive)               siBias = "bull";   // gold bull + industrial demand = strong bull
+  if (geopoliticalUnwind && riskOn)                                     siBias = "bear";   // double headwind: safe-haven + industrial risk-on flows away
+  else if (gcBias === "bear")                                           siBias = "bear";
+  else if (gcBias === "bull" && industrialDemandPositive)               siBias = "bull";
   else if (gcBias === "bull" && !growthFears && !industrialDemandNegative) siBias = "bull";
-  else if (gcBias === "bull" && (growthFears || industrialDemandNegative)) siBias = "neutral"; // safe-haven bid offset by industrial weakness
+  else if (gcBias === "bull" && (growthFears || industrialDemandNegative)) siBias = "neutral";
   else if (gcBias === "neutral" && (growthFears || industrialDemandNegative)) siBias = "bear";
   else if (gcBias === "neutral" && industrialDemandPositive)            siBias = "bull";
   else                                                                  siBias = "neutral";
@@ -1142,17 +1198,17 @@ function scoreInstruments(econ, earn, premarket, news, metaScore, regime) {
   const plBias   = sig(plScore);
 
   // ── ENERGIES ──
-  // CL: supply shock from geopolitical events OVERRIDES macro bearish signal
-  // Middle East war / OPEC cuts = bull even in risk-off / strong dollar environment
-  // Only genuine demand destruction (recession) beats the supply shock
+  // CL: geopolitical supply shock = bull, but de-escalation (supply unwind) = explicitly BEARISH
+  // The removal of a risk premium is itself a directional catalyst — not neutral
   let clBias;
-  if (oilSupplyShock && !oilDemandDestruction)         clBias = "bull";    // supply shock dominates — geopolitical premium
-  else if (oilSupplyShock && oilDemandDestruction)     clBias = "neutral"; // supply shock vs demand destruction = mixed
-  else if (oilDemandDestruction || growthFears)        clBias = "bear";    // demand destruction wins when no supply shock
+  if (oilSupplyUnwind)                                 clBias = "bear";    // geopolitical premium fading = supply bid removed
+  else if (oilSupplyShock && !oilDemandDestruction)    clBias = "bull";    // active supply shock dominates
+  else if (oilSupplyShock && oilDemandDestruction)     clBias = "neutral"; // supply shock vs demand destruction
+  else if (oilDemandDestruction || growthFears)        clBias = "bear";    // demand destruction
   else if (riskOn && dollarWeak)                       clBias = "bull";    // risk-on + weak dollar
-  else if (riskOff && dollarStrong && !oilSupplyShock) clBias = "bear";    // macro bearish, no oil-specific catalyst
-  else if (dollarStrong && !oilSupplyShock)            clBias = "bear";
-  else if (riskOff && !oilSupplyShock)                 clBias = "bear";
+  else if (riskOff && dollarStrong)                    clBias = "bear";    // macro bearish
+  else if (dollarStrong)                               clBias = "bear";
+  else if (riskOff)                                    clBias = "bear";
   else                                                 clBias = "neutral";
 
   // NG: weather/storage driven — macro-independent unless specific NG catalyst detected
