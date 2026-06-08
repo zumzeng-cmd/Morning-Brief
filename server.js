@@ -1936,61 +1936,70 @@ const MARKET_SYMBOLS = [
 
 async function fetchLivePrices() {
   const results = {};
-
-  // Yahoo Finance — free, no API key, covers all futures
-  // Falls back to Finnhub if Yahoo fails
+  const FMP_KEY = process.env.FMP_API_KEY || "WQMcZiIIJ1rarvN3puluUNQoGXFdvkjg";
   const FINNHUB_KEY = process.env.FINNHUB_API_KEY || "d8gh1phr01qlgcujfjfgd8gh1phr01qlgcujfjg0";
 
-  async function fetchYahoo(symbol) {
+  // FMP stable batch quote — fetch all symbols in one call
+  // FMP futures symbols use = notation: ES=F, NQ=F etc.
+  async function fetchFMPBatch() {
     try {
-      const url = "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(symbol) +
-        "?interval=1d&range=1d&includePrePost=true";
-      const raw = await fetchUrl(url, {
-        "Accept": "application/json",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
-      });
+      const symbols = MARKET_SYMBOLS.map(s => s.finnhub).join(",");
+      const raw = await fetchUrl(
+        "https://financialmodelingprep.com/stable/quote?symbol=" + encodeURIComponent(symbols) + "&apikey=" + FMP_KEY
+      );
       const json = JSON.parse(raw);
-      const meta = json.chart && json.chart.result && json.chart.result[0] && json.chart.result[0].meta;
-      if (!meta || !meta.regularMarketPrice) return null;
-      const price  = parseFloat(meta.regularMarketPrice);
-      const prev   = parseFloat(meta.previousClose || meta.chartPreviousClose);
-      const change = price - prev;
-      const pct    = prev ? (change / prev) * 100 : 0;
-      return {
-        price,  prev,
-        change: parseFloat(change.toFixed(2)),
-        pct:    parseFloat(pct.toFixed(2)),
-        high:   parseFloat(meta.regularMarketDayHigh  || 0),
-        low:    parseFloat(meta.regularMarketDayLow   || 0),
-      };
+      if (!Array.isArray(json) || json.length === 0) return null;
+      const map = {};
+      json.forEach(q => {
+        if (q.symbol && q.price) {
+          map[q.symbol] = {
+            price:  parseFloat(q.price),
+            prev:   parseFloat(q.previousClose || q.price),
+            pct:    parseFloat(q.changesPercentage) || 0,
+            change: parseFloat(q.change) || 0,
+            high:   parseFloat(q.dayHigh) || 0,
+            low:    parseFloat(q.dayLow)  || 0,
+          };
+        }
+      });
+      return Object.keys(map).length > 0 ? map : null;
     } catch(e) {
+      console.log("FMP batch quote error:", e.message);
       return null;
     }
   }
 
-  async function fetchFinnhub(finnhubSymbol) {
+  // Finnhub individual fallback
+  async function fetchFinnhubOne(symbol) {
     try {
       const raw = await fetchUrl(
-        "https://finnhub.io/api/v1/quote?symbol=" + finnhubSymbol + "&token=" + FINNHUB_KEY
+        "https://finnhub.io/api/v1/quote?symbol=" + symbol + "&token=" + FINNHUB_KEY
       );
       const q = JSON.parse(raw);
-      if (!q || q.c === 0 || q.error) return null;
+      if (!q || !q.c || q.c === 0) return null;
       return {
         price:  parseFloat(q.c),
         prev:   parseFloat(q.pc),
         pct:    parseFloat(q.dp) || 0,
         change: parseFloat(q.d)  || 0,
-        high:   parseFloat(q.h),
-        low:    parseFloat(q.l),
+        high:   parseFloat(q.h)  || 0,
+        low:    parseFloat(q.l)  || 0,
       };
     } catch(e) { return null; }
   }
 
+  // Try FMP batch first
+  const fmpMap = await fetchFMPBatch();
+  console.log("Market prices: FMP batch returned", fmpMap ? Object.keys(fmpMap).length : 0, "symbols");
+
   const quotes = await Promise.all(MARKET_SYMBOLS.map(async (s) => {
-    // Try Yahoo first, fall back to Finnhub
-    let q = await fetchYahoo(s.finnhub);
-    if (!q) q = await fetchFinnhub(s.finnhub);
-    if (!q) return { ticker: s.ticker, group: s.group, price: null, pct: null };
+    // Use FMP result if available, else try Finnhub individually
+    let q = fmpMap && fmpMap[s.finnhub] ? fmpMap[s.finnhub] : null;
+    if (!q) q = await fetchFinnhubOne(s.finnhub);
+    if (!q) {
+      console.log("No price data for:", s.ticker, s.finnhub);
+      return { ticker: s.ticker, group: s.group, price: null, pct: null };
+    }
     return { ticker: s.ticker, group: s.group, ...q };
   }));
 
