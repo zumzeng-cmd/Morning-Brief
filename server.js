@@ -1125,74 +1125,42 @@ function scoreInstruments(econ, earn, premarket, news, metaScore, regime) {
   const earnScore  = earn      ? parseFloat(earn.score)      || 0 : 0;
   const overallWS  = metaScore ? parseFloat(metaScore.weightedScore) || 0 : 0;
 
-  // ── Structured catalyst flags — read from card results (Claude-identified) ──
-  // Primary source: catalysts field from news and econ cards (set by Claude during analysis)
-  // Fallback: regex on text for backwards compatibility with cached/old results
-  function getCat(card, key) {
-    return card && card.catalysts && card.catalysts[key] === true;
-  }
-
-  // Merge catalysts from both news and econ cards — either source can set a flag
+  // ── Catalyst flags — read from Claude's structured output, regex fallback for old results ──
   const newsCats = (news && news.catalysts) || {};
   const econCats = (econ && econ.catalysts) || {};
-  const mergedCats = Object.assign({}, econCats, newsCats,
-    // OR merge: if either card says true, result is true
-    Object.keys(Object.assign({}, econCats, newsCats)).reduce((acc, k) => {
-      acc[k] = !!(econCats[k] || newsCats[k]);
-      return acc;
-    }, {})
-  );
 
-  // ── Primary: structured catalyst flags ──
-  const oilSupplyShock     = !!(mergedCats.oilSupplyShock);
-  const oilSupplyUnwind    = !!(mergedCats.oSU);
-  const geopoliticalCrisis = !!(mergedCats.geopoliticalEscalation);
-  const geopoliticalUnwind = !!(mergedCats.geopoliticalDeEscalation);
-  const inflationFears     = !!(mergedCats.inflationHot);
-  const fedPivot           = !!(mergedCats.fedDovish);
-  const chinaStimulus      = !!(mergedCats.chinaStimulus);
-  const globalGrowthPositive = false; // not yet in schema — extend later
-  const oilDemandDestruction = !!(mergedCats.gF);
-  const ngCatalystFlag     = false; // NG remains neutral unless specifically flagged — extend later
-  const ngBull = false;
-  const ngBear = false;
+  // OR-merge: if either card sets a flag true, it's true
+  const mergedCats = {};
+  const allCatKeys = new Set([...Object.keys(newsCats), ...Object.keys(econCats)]);
+  allCatKeys.forEach(k => { mergedCats[k] = !!(newsCats[k] || econCats[k]); });
 
-  // ── Fallback: regex on text (for old cached results without catalysts field) ──
-  const hasCatalysts = news && news.catalysts !== undefined;
-  if (!hasCatalysts) {
-    const newsText = ((news ? news.summary : "") + " " + (news ? news.guidance||"" : "")).toLowerCase();
-    const econText = ((econ ? econ.summary : "")).toLowerCase();
-    const allText  = newsText + " " + econText;
-    const deEsc = /ceasefire|de-escalat|end of operation|peace deal|truce|withdrawal|tensions eas|premium.*fad|geopolit.*eas|iran.*end|israel.*end|end.*military/.test(allText);
-    Object.assign(mergedCats, {
-      oilSupplyShock:          /middle east|iran|israel|opec cut|supply shock|houthi|oil supply|production cut/.test(allText) && !deEsc,
-      oilSupplyUnwind:         /middle east|iran|israel|opec cut|supply shock|houthi|oil supply|production cut/.test(allText) && deEsc,
-      geopoliticalEscalation:  /war|military|attack|invasion|missile|escalat|crisis|conflict|iran|russia|terror/.test(allText) && !deEsc,
-      geopoliticalDeEscalation:/ceasefire|de-escalat|end of operation|peace deal|truce|withdrawal|tensions eas/.test(allText),
-      fedDovish:               /fed cut|rate cut|pivot|dovish|easing|accommodative/.test(allText),
-      inflationHot:            /inflation|cpi|pce|price pressure|inflationary/.test(allText),
-      chinaStimulus:           /china stimulus|pboc|china growth|chinese demand/.test(allText),
-      gF:             /recession|demand destruction|demand collapse|global slowdown/.test(allText),
-    });
+  // Regex fallback for cached results without catalysts field
+  if (!news || news.catalysts === undefined) {
+    const nt = ((news ? news.summary : "") + " " + (news ? news.guidance||"" : "") + " " + (econ ? econ.summary : "")).toLowerCase();
+    const deEsc = /ceasefire|de-escalat|end of operation|peace deal|truce|withdrawal|tensions eas|iran.*end|israel.*end|end.*military/.test(nt);
+    if (!mergedCats.oilSupplyShock)         mergedCats.oilSupplyShock         = /middle east|iran|israel|opec cut|supply shock|houthi|oil supply|production cut/.test(nt) && !deEsc;
+    if (!mergedCats.oilSupplyUnwind)        mergedCats.oilSupplyUnwind        = /middle east|iran|israel|opec cut|supply shock|houthi|oil supply|production cut/.test(nt) && deEsc;
+    if (!mergedCats.geopoliticalEscalation) mergedCats.geopoliticalEscalation = /war|military|attack|invasion|missile|escalat|crisis|conflict|iran|russia|terror/.test(nt) && !deEsc;
+    if (!mergedCats.geopoliticalDeEscalation) mergedCats.geopoliticalDeEscalation = /ceasefire|de-escalat|end of operation|peace deal|truce|withdrawal|tensions eas/.test(nt);
+    if (!mergedCats.fedDovish)              mergedCats.fedDovish              = /fed cut|rate cut|pivot|dovish|easing|accommodative/.test(nt);
+    if (!mergedCats.inflationHot)           mergedCats.inflationHot           = /inflation|cpi|pce|price pressure|inflationary/.test(nt);
+    if (!mergedCats.chinaStimulus)          mergedCats.chinaStimulus          = /china stimulus|pboc|china growth|chinese demand/.test(nt);
+    if (!mergedCats.growthFears)            mergedCats.growthFears            = /recession|demand destruction|demand collapse|global slowdown/.test(nt);
   }
 
-  // Re-assign from merged (covers both structured and fallback paths)
-  const _oilSupplyShock     = !!(mergedCats.oilSupplyShock     ?? oilSupplyShock);
-  const _oilSupplyUnwind    = !!(mergedCats.oilSupplyUnwind    ?? oSU);
-  const _geoCrisis          = !!(mergedCats.geopoliticalEscalation ?? geopoliticalCrisis);
-  const _geoUnwind          = !!(mergedCats.geopoliticalDeEscalation ?? geopoliticalUnwind);
-  const _inflationFears     = !!(mergedCats.inflationHot       ?? inflationFears);
-  const _fedPivot           = !!(mergedCats.fedDovish          ?? fP);
-  const _chinaStimulus      = !!(mergedCats.chinaStimulus      ?? chinaStimulus);
-  const _gF        = !!(mergedCats.gF        ?? oilDemandDestruction);
-  const _industrialPos      = _cS || iP;
-  const _industrialNeg      = _gF;
-
-  // Remap to variable names used by rest of function
-  // (so we don't need to rename every reference below)
-  const [oSS, oSU, gC, gU, iF, fP, cS, gF, iP, iN] =
-    [_oilSupplyShock, _oilSupplyUnwind, _geoCrisis, _geoUnwind,
-     _inflationFears, _fedPivot, _chinaStimulus, _gF, _industrialPos, _industrialNeg];
+  // ── Named catalyst booleans used in scoring below ──
+  const oilSupplyShock     = !!mergedCats.oilSupplyShock;
+  const oilSupplyUnwind    = !!mergedCats.oilSupplyUnwind;
+  const geopoliticalCrisis = !!mergedCats.geopoliticalEscalation;
+  const geopoliticalUnwind = !!mergedCats.geopoliticalDeEscalation;
+  const inflationFears     = !!mergedCats.inflationHot;
+  const fedPivot           = !!mergedCats.fedDovish;
+  const chinaStimulus      = !!mergedCats.chinaStimulus;
+  const catGrowthFears     = !!mergedCats.growthFears;
+  const iP = chinaStimulus;   // industrial demand positive
+  const iN = catGrowthFears;  // industrial demand negative
+  const ngBull = false; // NG neutral unless specific catalyst (extend later)
+  const ngBear = false;
 
   // ── RAW econ direction — independent of regime flip ──
   // Use the passed-in regime object (not module-level cache) to determine
