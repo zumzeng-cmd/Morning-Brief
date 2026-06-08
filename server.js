@@ -635,7 +635,7 @@ const ECON_PROMPT = [
   "TIER 1 (dominates everything): Fed rate decision, FOMC, NFP, CPI, PCE. TIER 2 (high weight): JOLTS, Jobless Claims, ADP, Unemployment Rate, PPI. TIER 3 (medium): GDP, ISM, PMI, Sentiment. TIER 4 (lower): Oil/gas inventories, metals.",
   "JOBLESS CLAIMS RULE: Initial Jobless Claims HIGHER than forecast = BEARISH (more people unemployed = labor weakening). Claims LOWER than forecast = BULLISH (fewer unemployed = strong labor). This is the opposite of most indicators — a higher number is bad. 225K vs 213K forecast = MISS = BEARISH.",
   "JOLTS RULE: JOLTS job openings HIGHER than forecast = BULLISH (more demand for workers). JOLTS lower = bearish.",
-  "TODAY-ONLY RULE: Only score reports confirmed released or scheduled for TODAY. Strictly ignore any reports from yesterday or earlier.",
+  "TODAY-ONLY RULE: Only score reports confirmed released or scheduled for TODAY at full weight. Exception: CARRY-FORWARD RULE — if NO Tier 1 or Tier 2 USD data was released today, but a major Tier 1 report (NFP, CPI, PCE, FOMC) was released in the PRIOR trading session (yesterday or last Friday if today is Monday), carry it forward at HALF score (0.5 instead of 1, or -0.5 instead of -1) with a note it is carry-over context. This reflects that the market is still trading the prior session's data even without a fresh print. Example: If NFP beat on Friday and today is Monday with no new data, score +0.5 bull with summary noting 'Carry-over from Friday NFP beat — market still pricing higher-for-longer.' Do NOT carry forward Tier 2 or lower data.",
   "MEGA-CAP STRICT RULE: any miss is a miss regardless of size.",
   "Score: bull=1, bear=-1, neutral=0.",
   // ── MODIFIED: guidance is not applicable for econ, explicitly set null ──
@@ -1130,7 +1130,7 @@ app.get("/api/history/:dateKey", function(req, res) {
 
 
 // ── Markets implications endpoint ────────────────────────────
-// NOTE: Claude only returns implication text and keyLevel.
+// NOTE: Claude only returns implication text per instrument.
 // All bias, bestSetup, and setupDirection are calculated server-side
 // using deterministic rules — Claude never decides instrument direction.
 const MARKETS_PROMPT = [
@@ -1139,13 +1139,13 @@ const MARKETS_PROMPT = [
   "FOR EACH INSTRUMENT provide ONLY:",
   "1. implication: ONE sentence on what today's specific drivers mean for this instrument. Name the actual catalyst (e.g. oil supply shock from Middle East war, geopolitical escalation, yield spike, dollar strength, Asia weakness). CRITICAL: Your sentence MUST reflect the instrument's actual price direction — if crude oil is rising due to geopolitical risk, say it is under upward pressure from supply risk premium. If gold has a safe-haven bid competing with dollar strength, explain the tension. Be directionally accurate and specific.",
   "NATURAL GAS SPECIAL RULE: NG (Natural Gas) is driven by weather, storage reports, and LNG demand — NOT by macro conditions, geopolitics, or equity sentiment. For NG, ONLY reference actual NG-specific catalysts (storage builds/draws, heating/cooling demand, LNG exports, pipeline issues). If no NG-specific catalyst exists today, write: 'Natural gas lacks a directional catalyst today — price action will be driven by technicals and the next storage report.' Do NOT mention risk-off, Asia weakness, or rate policy for NG.",
-  "2. keyLevel: the single most important price level or zone to watch today, as a string (e.g. '5250' or '19200-19400'). Null if genuinely unknown.",
+
   "DO NOT include bias, signal, bestSetup, setupDirection, or divergence — the server calculates these.",
   "RETURN a JSON object with this exact structure:",
-  "{ \"equities\": { \"ES\": {\"implication\":\"..\",\"keyLevel\":\"5250\"}, \"NQ\":{\"implication\":\"..\",\"keyLevel\":\"19200\"}, \"YM\":{\"implication\":\"..\",\"keyLevel\":\"38500\"}, \"RTY\":{\"implication\":\"..\",\"keyLevel\":\"2010\"} },",
-  "\"metals\": { \"GC\":{\"implication\":\"..\",\"keyLevel\":\"2340\"}, \"SI\":{\"implication\":\"..\",\"keyLevel\":\"29.50\"}, \"HG\":{\"implication\":\"..\",\"keyLevel\":\"4.15\"}, \"PL\":{\"implication\":\"..\",\"keyLevel\":\"1050\"} },",
-  "\"energies\": { \"CL\":{\"implication\":\"..\",\"keyLevel\":\"78.50\"}, \"NG\":{\"implication\":\"..\",\"keyLevel\":null} },",
-  "\"dxy\": { \"DXY\":{\"implication\":\"..\",\"keyLevel\":\"104.50\"} } }"
+  "{ \"equities\": { \"ES\": {\"implication\":\"..\"}, \"NQ\":{\"implication\":\"..\"}, \"YM\":{\"implication\":\"..\"}, \"RTY\":{\"implication\":\"..\"} },",
+  "\"metals\": { \"GC\":{\"implication\":\"..\"}, \"SI\":{\"implication\":\"..\"}, \"HG\":{\"implication\":\"..\"}, \"PL\":{\"implication\":\"..\"} },",
+  "\"energies\": { \"CL\":{\"implication\":\"..\"}, \"NG\":{\"implication\":\"..\"} },",
+  "\"dxy\": { \"DXY\":{\"implication\":\"..\"} } }"
 ].join(" ");
 
 // ── Deterministic instrument scoring ─────────────────────────
@@ -1472,7 +1472,6 @@ app.post("/api/markets", async function(req, res) {
         out[ticker] = {
           bias:           s.bias,
           implication:    c.implication || "No implication data.",
-          keyLevel:       c.keyLevel    || null,
           divergence:     s.divergence,
           bestSetup:      s.bestSetup,
           setupDirection: s.setupDirection
