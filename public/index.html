@@ -523,101 +523,81 @@ function todayKey(){
 }
 
 // mode switching
+// ── Tab switching — always reset all panels/buttons first ──
+function resetAllTabs() {
+  // Deactivate all tab buttons
+  ['btnToday','btnMarkets','btnSummary','btnHist'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.classList.remove('active');
+  });
+  // Hide all panels
+  document.getElementById('panelMarkets').style.display = 'none';
+  document.getElementById('panelSummary').style.display = 'none';
+  document.querySelector('.grid').style.display = 'none';
+  document.querySelector('.history-section').style.display = 'none';
+  // Hide contextual elements
+  var rb = document.getElementById('rationaleBox'); if (rb) rb.style.display = 'none';
+  var reg = document.getElementById('regimeBar');   if (reg) reg.style.display = 'none';
+  document.getElementById('datePicker').style.display = 'none';
+  document.getElementById('runBtn').style.display = 'none';
+  document.getElementById('overrideRow').style.opacity = '0.3';
+  document.getElementById('overrideRow').style.pointerEvents = 'none';
+}
+
 function switchToToday(){
-  historyMode=false;
+  historyMode = false;
+  resetAllTabs();
   document.getElementById('btnToday').classList.add('active');
-  document.getElementById('btnHist').classList.remove('active');
-  document.getElementById('btnMarkets').classList.remove('active');
-  document.getElementById('datePicker').style.display='none';
-  document.getElementById('modeBadge').textContent='LIVE';
-  document.getElementById('modeBadge').className='mode-badge mode-live';
-  document.getElementById('runBtn').style.display='';
-  document.getElementById('overrideRow').style.opacity='1';
-  document.getElementById('overrideRow').style.pointerEvents='';
-  // Show/hide panels only — never reset card data
-  document.getElementById('datePicker').style.display='none';
-  document.getElementById('panelMarkets').style.display='none';
-  document.getElementById('panelSummary').style.display='none';
-  document.querySelector('.grid').style.display='grid';
-  document.querySelector('.history-section').style.display='block';
-  var rb=document.getElementById('rationaleBox');
-  if(rb) rb.style.display = lastResults && Object.keys(lastResults).length > 0 ? 'flex' : 'none';
-  // Restore regime bar if analysis has run
-  var regBar=document.getElementById('regimeBar');
-  if(regBar) regBar.style.display = lastRegime ? 'flex' : 'none';
-  // Deactivate summary tab button
-  var btnS=document.getElementById('btnSummary');
-  if(btnS) btnS.classList.remove('active');
+  document.getElementById('modeBadge').textContent = 'LIVE';
+  document.getElementById('modeBadge').className = 'mode-badge mode-live';
+  document.getElementById('runBtn').style.display = '';
+  document.getElementById('overrideRow').style.opacity = '1';
+  document.getElementById('overrideRow').style.pointerEvents = '';
+  document.querySelector('.grid').style.display = 'grid';
+  document.querySelector('.history-section').style.display = 'block';
+  var rb = document.getElementById('rationaleBox');
+  if (rb) rb.style.display = lastResults && Object.keys(lastResults).length > 0 ? 'flex' : 'none';
+  var reg = document.getElementById('regimeBar');
+  if (reg) reg.style.display = lastRegime ? 'flex' : 'none';
 }
 
 function switchToHistory(){
-  historyMode=true;
-  document.getElementById('btnToday').classList.remove('active');
+  historyMode = true;
+  resetAllTabs();
   document.getElementById('btnHist').classList.add('active');
-  document.getElementById('btnMarkets').classList.remove('active');
-  document.getElementById('datePicker').style.display='inline-block';
-  document.getElementById('modeBadge').textContent='HISTORY';
-  document.getElementById('modeBadge').className='mode-badge mode-hist';
-  document.getElementById('runBtn').style.display='none';
-  document.getElementById('overrideRow').style.opacity='0.3';
-  document.getElementById('overrideRow').style.pointerEvents='none';
-  document.getElementById('panelMarkets').style.display='none';
-  document.getElementById('panelSummary').style.display='none';
-  document.querySelector('.grid').style.display='grid';
-  document.querySelector('.history-section').style.display='block';
-  document.getElementById('datePicker').value=todayKey();
+  document.getElementById('modeBadge').textContent = 'HISTORY';
+  document.getElementById('modeBadge').className = 'mode-badge mode-hist';
+  document.getElementById('datePicker').style.display = 'inline-block';
+  document.getElementById('datePicker').value = todayKey();
+  document.querySelector('.grid').style.display = 'grid';
+  document.querySelector('.history-section').style.display = 'block';
 }
 
 function switchToSummary(){
-  historyMode=false;
-  document.getElementById('btnToday').classList.remove('active');
-  document.getElementById('btnMarkets').classList.remove('active');
+  historyMode = false;
+  resetAllTabs();
   document.getElementById('btnSummary').classList.add('active');
-  document.getElementById('btnHist').classList.remove('active');
-  document.getElementById('datePicker').style.display='none';
-  document.getElementById('modeBadge').textContent='SUMMARY';
-  document.getElementById('modeBadge').className='mode-badge mode-hist';
-  document.getElementById('runBtn').style.display='none';
-  document.getElementById('overrideRow').style.opacity='0.3';
-  document.getElementById('overrideRow').style.pointerEvents='none';
-  document.getElementById('panelSummary').style.display='block';
-  document.getElementById('panelMarkets').style.display='none';
-  document.querySelector('.grid').style.display='none';
-  document.querySelector('.history-section').style.display='none';
-  var rb=document.getElementById('rationaleBox'); if(rb) rb.style.display='none';
-  var regimeBar=document.getElementById('regimeBar'); if(regimeBar) regimeBar.style.display='none';
+  document.getElementById('modeBadge').textContent = 'SUMMARY';
+  document.getElementById('modeBadge').className = 'mode-badge mode-hist';
+  document.getElementById('panelSummary').style.display = 'block';
 }
 
 function switchToMarkets(){
-  historyMode=false;
-  document.getElementById('btnToday').classList.remove('active');
-  document.getElementById('btnHist').classList.remove('active');
+  historyMode = false;
+  resetAllTabs();
   document.getElementById('btnMarkets').classList.add('active');
-  // Auto-load markets if we have analysis results but no market cards rendered
+  document.getElementById('modeBadge').textContent = 'MARKETS';
+  document.getElementById('modeBadge').className = 'mode-badge mode-hist';
+  document.getElementById('panelMarkets').style.display = 'block';
+  // Auto-load if results exist but no cards rendered yet
   var mc = document.getElementById('marketsContent');
   var hasCards = mc && mc.querySelector('.market-card') !== null;
   var hasResults = lastResults && Object.keys(lastResults).length > 0;
   if (!hasCards && hasResults) {
-    // Results exist but markets not rendered — load now
     setTimeout(function() { loadMarketsBackground(); }, 100);
   } else if (hasCards) {
-    // Cards already rendered — just refresh prices
     setTimeout(refreshLivePrices, 100);
   }
-  // If no results at all, show the default empty state (user needs to run analysis)
-  document.getElementById('datePicker').style.display='none';
-  document.getElementById('modeBadge').textContent='MARKETS';
-  document.getElementById('modeBadge').className='mode-badge mode-hist';
-  document.getElementById('runBtn').style.display='none';
-  document.getElementById('overrideRow').style.opacity='0.3';
-  document.getElementById('overrideRow').style.pointerEvents='none';
-  // Show markets panel, hide today grid — data is preserved
-  document.getElementById('datePicker').style.display='none';
-  document.getElementById('panelMarkets').style.display='block';
-  document.querySelector('.grid').style.display='none';
-  document.querySelector('.history-section').style.display='none';
-  var rb=document.getElementById('rationaleBox');
-  if(rb) rb.style.display='none';
 }
 
 function switchToTodayFull(){
