@@ -796,7 +796,7 @@ app.post("/api/analyze", async function(req, res) {
           // Sunday before 5pm — neutral
           console.log("Premarket: Sunday pre-open closed");
         } else {
-          // null (Sunday evening / Monday pre-Europe) OR Finnhub failed — web search
+          // Sunday evening, Monday pre-Europe, or Finnhub fallback — use Sonnet + web search
           rawData = "NO EXTERNAL DATA";
           let searchCtx = "";
           if (dayET === 0 && hourET2 >= 17) {
@@ -808,13 +808,6 @@ app.post("/api/analyze", async function(req, res) {
           }
           prompt = PREMARKET_PROMPT + searchCtx;
           useSearch = true;
-          // Wait 65s to clear Anthropic rate limit window if Sonnet was recently used (e.g. earnings web search)
-          const timeSinceLastSonnet = Date.now() - (global.lastSonnetCallMs || 0);
-          if (timeSinceLastSonnet < 65000) {
-            const waitMs = 65000 - timeSinceLastSonnet;
-            console.log("Premarket: waiting " + Math.round(waitMs/1000) + "s for Sonnet rate limit window to reset...");
-            await new Promise(r => setTimeout(r, waitMs));
-          }
           console.log("Premarket: using web search —", dayET === 0 ? "Sunday evening" : dayET === 1 && hourET2 < 3 ? "Monday pre-Europe" : "Finnhub fallback");
         }
       }
