@@ -777,7 +777,15 @@ function setCardResult(key,result){
     });
   }
 
-  const pts = result.score * WEIGHTS[key];
+  // After US open, premarket score is always 0 regardless of result
+  var etNowSCR = new Date();
+  var etHourSCR = parseInt(etNowSCR.toLocaleString('en-US',{hour:'2-digit',hour12:false,timeZone:'America/New_York'}));
+  var etMinSCR  = etNowSCR.getMinutes();
+  var etDaySCR  = etNowSCR.toLocaleDateString('en-US',{weekday:'short',timeZone:'America/New_York'});
+  var sessionOpenSCR = !['Sat','Sun'].includes(etDaySCR) && (etHourSCR > 9 || (etHourSCR === 9 && etMinSCR >= 30));
+  var effectiveScore = (key === 'premarket' && sessionOpenSCR) ? 0 : result.score;
+
+  const pts = effectiveScore * (WEIGHTS[key]||1);
   const ptsClass=pts>0?'pts-bull':pts<0?'pts-bear':'pts-neu';
   document.getElementById('sig-'+key).textContent = isShockNews ? '&#9888;&#65039; SHOCK TRIGGER' : sig;
   document.getElementById('sig-'+key).className='card-sig '+(isShockNews?'sig-bear':sigClass);
@@ -787,7 +795,23 @@ function setCardResult(key,result){
   document.getElementById('pts-'+key).textContent=(pts>=0?'+':'')+pts.toFixed(1);
   document.getElementById('pts-'+key).className='card-pts '+ptsClass;
   document.getElementById('card-'+key).className='card '+(result.signal==='bull'?'bull':result.signal==='bear'?'bear':'');
-  if(!overrides[key]) scores[key]=result.score;
+  if(!overrides[key]) scores[key] = effectiveScore; // always use effective score (0 for premarket after open)
+
+  // Add/maintain AT OPEN badge for premarket after session starts
+  if (key === 'premarket' && sessionOpenSCR) {
+    var ptsEl2 = document.getElementById('pts-premarket');
+    if (ptsEl2) {
+      var footer2 = ptsEl2.parentElement;
+      if (footer2 && !footer2.querySelector('.at-open-badge')) {
+        var badge2 = document.createElement('span');
+        badge2.className = 'at-open-badge';
+        badge2.textContent = 'AT OPEN ✓';
+        badge2.style.cssText = 'font-size:9px;padding:1px 6px;border-radius:2px;background:rgba(74,86,104,0.2);color:var(--muted);border:1px solid var(--border2);letter-spacing:0.06em;margin-left:4px;';
+        footer2.appendChild(badge2);
+      }
+    }
+  }
+
   updateBias();
 }
 
