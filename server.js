@@ -1042,28 +1042,26 @@ app.post("/api/meta-score", async function(req, res) {
     const etDayMeta  = etNowMeta.getDay();
     const isWeekday  = etDayMeta >= 1 && etDayMeta <= 5;
     const afterOpen  = isWeekday && (etHourMeta > 9 || (etHourMeta === 9 && etMinMeta >= 30));
-    if (afterOpen && weights.premarket > 1) {
-      weights.premarket = 1;
-      console.log("Meta: pre-market weight capped at 1 (US session open)");
-    }
-
-    // SOLO PRE-MARKET RULE: After open, pre-market alone cannot drive bullish/bearish bias.
-    // If econ + earn + news are all neutral (0) and only pre-market has a signal,
-    // force pre-market weight to 1 regardless of time — it takes two signals to set direction.
-    const otherScoresAllNeutral = afterOpen &&
-      (cardScores.econ === 0) && (cardScores.earn === 0) && (cardScores.news === 0);
-    if (otherScoresAllNeutral && cardScores.premarket !== 0) {
-      weights.premarket = 1;
-      console.log("Meta: pre-market weight held at 1 — sole signal after open cannot set bias alone");
-    }
-
-    // Get scores from request body
+    // Get scores from request body — must be before weight cap logic
     const cardScores = {
       econ:      econ      ? (parseFloat(econ.score)      || 0) : 0,
       earn:      earn      ? (parseFloat(earn.score)      || 0) : 0,
       premarket: premarket ? (parseFloat(premarket.score) || 0) : 0,
       news:      news      ? (parseFloat(news.score)      || 0) : 0
     };
+
+    if (afterOpen && weights.premarket > 1) {
+      weights.premarket = 1;
+      console.log("Meta: pre-market weight capped at 1 (US session open)");
+    }
+
+    // SOLO PRE-MARKET RULE: After open, pre-market alone cannot drive bullish/bearish bias.
+    const otherScoresAllNeutral = afterOpen &&
+      (cardScores.econ === 0) && (cardScores.earn === 0) && (cardScores.news === 0);
+    if (otherScoresAllNeutral && cardScores.premarket !== 0) {
+      weights.premarket = 1;
+      console.log("Meta: pre-market weight held at 1 — sole signal after open cannot set bias alone");
+    }
 
     // Weighted score: sum(score * weight) / sum(weights)
     const totalWeight = Object.keys(weights).reduce((s, k) => s + (weights[k] || 0), 0);
@@ -1093,6 +1091,7 @@ app.post("/api/meta-score", async function(req, res) {
     res.json(finalResult);
   } catch(e) {
     console.error("Meta-score error:", e.message);
+    console.error("Meta-score stack:", e.stack ? e.stack.slice(0, 400) : "no stack");
     res.status(500).json({ error: e.message });
   }
 });
