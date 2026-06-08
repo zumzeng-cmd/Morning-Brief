@@ -8,12 +8,17 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Bebas+Neue&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;}
 :root{
-  --bg:#080C0F;--surface:#0E1318;--surface2:#141B22;--border:#1E2830;
+  --bg:#080C0F;--surface:#0E1318;--surface2:#141B22;--border:#1E2830;--border2:#2A3A4A;
   --accent:#00FF94;--accent2:#FFB800;--bear:#FF4444;--bull:#00FF94;
   --text:#E2E8F0;--muted:#4A6070;
   --font-display:'Bebas Neue',sans-serif;--font-mono:'DM Mono',monospace;
 }
-body{background:var(--bg);color:var(--text);font-family:var(--font-mono);min-height:100vh;}
+body.light-mode{
+  --bg:#F4F6F8;--surface:#FFFFFF;--surface2:#EEF1F5;--border:#D1D9E0;--border2:#B8C4CE;
+  --accent:#007A45;--accent2:#B8860B;--bear:#CC2222;--bull:#007A45;
+  --text:#1A2332;--muted:#6B7C8D;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font-mono);min-height:100vh;transition:background 0.2s,color 0.2s;}
 /* grid lines removed */
 .wrap{position:relative;z-index:1;padding:1.5rem;max-width:1100px;margin:0 auto;}
 .hdr{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:1.2rem;border-bottom:1px solid var(--border);padding-bottom:1rem;}
@@ -363,6 +368,12 @@ body.backtest-mode .run-btn:hover:not(:disabled) { background: rgba(255,184,0,0.
     <div style="margin-left:12px;display:flex;align-items:center;gap:8px;">
       <input type="date" id="datePicker" style="display:none;background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:11px;padding:4px 8px;border-radius:3px;outline:none;" onchange="loadDate(this.value)"/>
       <button class="dnbtn" id="btnHist" onclick="switchToHistory()">HISTORY</button>
+    <button id="themeToggle" onclick="toggleTheme()" title="Toggle light/dark mode"
+      style="background:transparent;border:1px solid var(--border);color:var(--muted);
+      padding:4px 10px;border-radius:3px;cursor:pointer;font-size:11px;letter-spacing:0.05em;
+      font-family:var(--font-mono);transition:all 0.2s;margin-left:8px;">
+      ☀
+    </button>
     </div>
   </div>
 
@@ -1583,6 +1594,22 @@ function setCardConfidence(key, confidence) {
     footer.appendChild(badge);
   }
 }
+
+function toggleTheme(){
+  var isLight = document.body.classList.toggle('light-mode');
+  document.getElementById('themeToggle').textContent = isLight ? '☽' : '☀';
+  try { localStorage.setItem('theme', isLight ? 'light' : 'dark'); } catch(e){}
+}
+// Restore saved theme on load
+(function(){
+  try {
+    if(localStorage.getItem('theme')==='light'){
+      document.body.classList.add('light-mode');
+      var btn=document.getElementById('themeToggle');
+      if(btn) btn.textContent='☽';
+    }
+  } catch(e){}
+})();
 
 async function loadHistory(){
   try{
