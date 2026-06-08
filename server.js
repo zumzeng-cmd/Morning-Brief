@@ -122,7 +122,66 @@ async function fetchEconFMP() {
       return eventName + impact + " | Act: " + act + " vs Est: " + est + prev + beat;
     });
 
-    return "FMP ECONOMIC CALENDAR FOR " + todayStr + ":\n" + lines.join("\n");
+    // Check if today has any Tier 1 data (NFP, CPI, PCE, FOMC, GDP)
+    const tier1Keywords = ["nonfarm","payroll","consumer price","cpi","pce","personal consumption","fomc","federal reserve","fed rate","interest rate","gross domestic","gdp"];
+    const hasTier1Today = eventsToUse.some(e => {
+      const name = (e.event || e.indicator || e.name || "").toLowerCase();
+      return tier1Keywords.some(k => name.includes(k));
+    });
+    const hasTier2Today = eventsToUse.some(e => {
+      const name = (e.event || e.indicator || e.name || "").toLowerCase();
+      return ["jobless","claims","jolts","adp","unemployment","ppi","producer price"].some(k => name.includes(k));
+    });
+
+    let priorCarryNote = "";
+    // If no Tier 1 or Tier 2 today, check prior 3 days for carry-forward
+    if (!hasTier1Today && !hasTier2Today) {
+      try {
+        const priorDate = new Date(today);
+        // Go back up to 5 calendar days to find last trading day with major data
+        const fromDate = new Date(today);
+        fromDate.setDate(fromDate.getDate() - 5);
+        const fromStr = fromDate.toISOString().slice(0, 10);
+        const prevStr2 = new Date(today.getTime() - 86400000).toISOString().slice(0, 10);
+        const priorRaw = await fetchUrl(
+          "https://financialmodelingprep.com/stable/economic-calendar?from=" + fromStr + "&to=" + prevStr2 + "&apikey=" + FMP_KEY
+        );
+        const priorJson = JSON.parse(priorRaw);
+        if (Array.isArray(priorJson)) {
+          // Find the most recent Tier 1 report with actual data
+          const tier1Prior = priorJson.filter(e => {
+            const name = (e.event || e.indicator || e.name || "").toLowerCase();
+            const country = (e.country || e.countryCode || e.currency || "").toUpperCase();
+            const isUSD = country === "US" || country === "USD" || country.includes("UNITED");
+            const isTier1 = tier1Keywords.some(k => name.includes(k));
+            const hasActual = e.actual !== null && e.actual !== undefined;
+            return isUSD && isTier1 && hasActual;
+          }).sort((a, b) => new Date(b.date) - new Date(a.date)); // most recent first
+
+          if (tier1Prior.length > 0) {
+            const latest = tier1Prior[0];
+            const latestName = latest.event || latest.indicator || latest.name || "Unknown";
+            const latestDate = (latest.date || "").slice(0, 10);
+            const act2 = String(latest.actual);
+            const est2 = (latest.estimate !== null && latest.estimate !== undefined) ? String(latest.estimate) : "N/A";
+            let beat2 = "";
+            if (est2 !== "N/A") {
+              beat2 = parseFloat(act2) > parseFloat(est2) ? "BEAT" : parseFloat(act2) < parseFloat(est2) ? "MISS" : "IN-LINE";
+            }
+            const daysAgo = Math.round((today - new Date(latestDate)) / 86400000);
+            priorCarryNote = "\n\nCARRY-FORWARD CONTEXT (" + daysAgo + " days ago, prior session):\n" +
+              latestName + " | Date: " + latestDate + " | Act: " + act2 + " vs Est: " + est2 +
+              (beat2 ? " → " + beat2 : "") +
+              "\n[Apply CARRY-FORWARD RULE: score at ±0.5 with note this is prior session data, not today\'s release]";
+            console.log("Econ carry-forward:", latestName, latestDate, beat2);
+          }
+        }
+      } catch(priorErr) {
+        console.log("Econ prior fetch error:", priorErr.message);
+      }
+    }
+
+    return "FMP ECONOMIC CALENDAR FOR " + todayStr + ":\n" + lines.join("\n") + priorCarryNote;
   } catch(e) {
     console.log("FMP econ error:", e.message);
     return null;
