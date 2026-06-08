@@ -1935,29 +1935,63 @@ const MARKET_SYMBOLS = [
 ];
 
 async function fetchLivePrices() {
-  const FINNHUB_KEY = process.env.FINNHUB_API_KEY || "d8gh1phr01qlgcujfjfgd8gh1phr01qlgcujfjg0";
   const results = {};
 
-  const quotes = await Promise.all(MARKET_SYMBOLS.map(async (s) => {
+  // Yahoo Finance — free, no API key, covers all futures
+  // Falls back to Finnhub if Yahoo fails
+  const FINNHUB_KEY = process.env.FINNHUB_API_KEY || "d8gh1phr01qlgcujfjfgd8gh1phr01qlgcujfjg0";
+
+  async function fetchYahoo(symbol) {
     try {
-      const raw = await fetchUrl(
-        "https://finnhub.io/api/v1/quote?symbol=" + s.finnhub + "&token=" + FINNHUB_KEY
-      );
-      const q = JSON.parse(raw);
-      if (!q || q.c === 0 || q.error) return { ticker: s.ticker, price: null, pct: null, prev: null };
+      const url = "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(symbol) +
+        "?interval=1d&range=1d&includePrePost=true";
+      const raw = await fetchUrl(url, {
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+      });
+      const json = JSON.parse(raw);
+      const meta = json.chart && json.chart.result && json.chart.result[0] && json.chart.result[0].meta;
+      if (!meta || !meta.regularMarketPrice) return null;
+      const price  = parseFloat(meta.regularMarketPrice);
+      const prev   = parseFloat(meta.previousClose || meta.chartPreviousClose);
+      const change = price - prev;
+      const pct    = prev ? (change / prev) * 100 : 0;
       return {
-        ticker:  s.ticker,
-        group:   s.group,
-        price:   parseFloat(q.c),
-        prev:    parseFloat(q.pc),
-        pct:     parseFloat(q.dp) || 0,
-        change:  parseFloat(q.d)  || 0,
-        high:    parseFloat(q.h),
-        low:     parseFloat(q.l),
+        price,  prev,
+        change: parseFloat(change.toFixed(2)),
+        pct:    parseFloat(pct.toFixed(2)),
+        high:   parseFloat(meta.regularMarketDayHigh  || 0),
+        low:    parseFloat(meta.regularMarketDayLow   || 0),
       };
     } catch(e) {
-      return { ticker: s.ticker, group: s.group, price: null, pct: null, prev: null };
+      return null;
     }
+  }
+
+  async function fetchFinnhub(finnhubSymbol) {
+    try {
+      const raw = await fetchUrl(
+        "https://finnhub.io/api/v1/quote?symbol=" + finnhubSymbol + "&token=" + FINNHUB_KEY
+      );
+      const q = JSON.parse(raw);
+      if (!q || q.c === 0 || q.error) return null;
+      return {
+        price:  parseFloat(q.c),
+        prev:   parseFloat(q.pc),
+        pct:    parseFloat(q.dp) || 0,
+        change: parseFloat(q.d)  || 0,
+        high:   parseFloat(q.h),
+        low:    parseFloat(q.l),
+      };
+    } catch(e) { return null; }
+  }
+
+  const quotes = await Promise.all(MARKET_SYMBOLS.map(async (s) => {
+    // Try Yahoo first, fall back to Finnhub
+    let q = await fetchYahoo(s.finnhub);
+    if (!q) q = await fetchFinnhub(s.finnhub);
+    if (!q) return { ticker: s.ticker, group: s.group, price: null, pct: null };
+    return { ticker: s.ticker, group: s.group, ...q };
   }));
 
   // Build results map + relative strength rank within each group
