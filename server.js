@@ -1938,46 +1938,70 @@ async function fetchLivePrices() {
   const results = {};
   const TD_KEY = process.env.TWELVE_DATA_API_KEY || "559c9af13d024c02bc3dde90163dbf8d";
 
-  // Twelve Data batch quote — all 11 symbols in one call
-  // Futures use continuous contract notation: ES1!, NQ1!, GC1! etc.
-  const tdSymbols = MARKET_SYMBOLS.map(s => s.td).join(",");
-  let tdMap = {};
-  try {
-    const tdUrl = "https://api.twelvedata.com/quote?symbol=" + encodeURIComponent(tdSymbols) + "&apikey=" + TD_KEY;
-    console.log("Twelve Data URL:", tdUrl.replace(TD_KEY, "***"));
-    const raw = await fetchUrl(tdUrl);
-    console.log("Twelve Data raw (first 300):", raw.slice(0, 300));
-    const json = JSON.parse(raw);
-    // Response is either { SYMBOL: {...} } for multiple or direct object for single
-    const entries = Object.keys(json);
-    entries.forEach(sym => {
-      const q = json[sym];
-      if (q && q.close && !q.code) { // code field = error
-        const price  = parseFloat(q.close);
-        const prev   = parseFloat(q.previous_close || q.close);
-        const change = parseFloat(q.change) || (price - prev);
-        const pct    = parseFloat(q.percent_change) || (prev ? (change/prev)*100 : 0);
-        tdMap[sym] = {
-          price:  price,
-          prev:   prev,
-          change: parseFloat(change.toFixed(2)),
-          pct:    parseFloat(pct.toFixed(2)),
-          high:   parseFloat(q.fifty_two_week ? q.fifty_two_week.high : 0) || parseFloat(q.high||0),
-          low:    parseFloat(q.fifty_two_week ? q.fifty_two_week.low  : 0) || parseFloat(q.low||0),
-        };
-      }
-    });
-    console.log("Market prices: Twelve Data returned", Object.keys(tdMap).length, "symbols");
-  } catch(e) {
-    console.log("Twelve Data error:", e.message);
+  // Twelve Data — free tier = 8 credits/min, each symbol costs 2 credits = max 4 per call
+  // Batch 1 (auto on load): NQ, ES, GC, CL — highest priority instruments
+  // Batch 2 (on manual refresh): YM, RTY, SI, HG, PL, CL, NG, DXY
+  // 60 second gap between batches stays within free tier limits
+
+  const BATCH1 = ["NQ1!", "ES1!", "GC1!", "CL1!"];
+  const BATCH2 = ["YM1!", "RTY1!", "SI1!", "HG1!", "PL1!", "NG1!", "DX1!"];
+
+  async function fetchTDBatch(symbols) {
+    try {
+      const url = "https://api.twelvedata.com/quote?symbol=" + encodeURIComponent(symbols.join(",")) + "&apikey=" + TD_KEY;
+      const raw = await fetchUrl(url);
+      const json = JSON.parse(raw);
+      if (json.code === 429) { console.log("Twelve Data rate limit hit"); return {}; }
+      const map = {};
+      // Handle both single symbol response and multi-symbol response
+      const entries = json.symbol ? { [json.symbol]: json } : json;
+      Object.keys(entries).forEach(sym => {
+        const q = entries[sym];
+        if (q && q.close && !q.code) {
+          const price  = parseFloat(q.close);
+          const prev   = parseFloat(q.previous_close || q.close);
+          const change = parseFloat(q.change) || (price - prev);
+          const pct    = parseFloat(q.percent_change) || (prev ? (change/prev)*100 : 0);
+          map[sym] = {
+            price:  price, prev,
+            change: parseFloat(change.toFixed(2)),
+            pct:    parseFloat(pct.toFixed(2)),
+            high:   parseFloat(q.high || 0),
+            low:    parseFloat(q.low  || 0),
+          };
+        }
+      });
+      console.log("Twelve Data batch returned", Object.keys(map).length, "of", symbols.length, "symbols:", symbols.join(","));
+      return map;
+    } catch(e) {
+      console.log("Twelve Data batch error:", e.message);
+      return {};
+    }
   }
+
+  // Fetch batch 1 immediately
+  let tdMap = await fetchTDBatch(BATCH1);
+
+  // Fetch batch 2 after 65 second delay (new rate limit window)
+  // Run async — don't block the response
+  setTimeout(async () => {
+    const map2 = await fetchTDBatch(BATCH2);
+    // Merge into a shared cache the next /api/market-prices call can use
+    Object.assign(global.priceCache || {}, map2);
+    console.log("Twelve Data batch 2 complete, cache updated");
+  }, 65000);
+
+  // Also merge any cached batch 2 data from previous calls
+  if (global.priceCache) {
+    Object.assign(tdMap, global.priceCache);
+  }
+  // Store batch 1 in cache too
+  global.priceCache = global.priceCache || {};
+  Object.assign(global.priceCache, tdMap);
 
   const quotes = MARKET_SYMBOLS.map(s => {
     const q = tdMap[s.td];
-    if (!q) {
-      console.log("No price for:", s.ticker, s.td);
-      return { ticker: s.ticker, group: s.group, price: null, pct: null };
-    }
+    if (!q) return { ticker: s.ticker, group: s.group, price: null, pct: null };
     return { ticker: s.ticker, group: s.group, ...q };
   });
 
