@@ -1288,7 +1288,7 @@ function scoreInstruments(econ, earn, premarket, news, metaScore, regime) {
   if (oilSupplyUnwind)                                 clBias = "bear";    // geopolitical premium fading = supply bid removed
   else if (oilSupplyShock && !catGrowthFears)    clBias = "bull";    // active supply shock dominates
   else if (oilSupplyShock && catGrowthFears)     clBias = "neutral"; // supply shock vs demand destruction
-  else if (gF || gF)        clBias = "bear";    // demand destruction
+  else if (catGrowthFears || growthFears)        clBias = "bear";    // demand destruction
   else if (riskOn && dollarWeak)                       clBias = "bull";    // risk-on + weak dollar
   else if (riskOff && dollarStrong)                    clBias = "bear";    // macro bearish
   else if (dollarStrong)                               clBias = "bear";
