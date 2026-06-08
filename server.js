@@ -635,7 +635,28 @@ const ECON_PROMPT = [
   "MEGA-CAP STRICT RULE: any miss is a miss regardless of size.",
   "Score: bull=1, bear=-1, neutral=0.",
   // ── MODIFIED: guidance is not applicable for econ, explicitly set null ──
-  "JSON SCHEMA: {\"signal\":\"bull|bear|neutral\",\"summary\":\"2 sentence summary\",\"score\":1,\"guidance\":null}"
+  "CATALYST FLAGS: After scoring, you must also identify which specific catalysts are present in the data. Set each flag to true or false based on what you actually read — do not infer or assume. These flags drive commodity and instrument scoring downstream so accuracy matters. " +
+  "JSON SCHEMA: {" +
+  "\"signal\":\"bull|bear|neutral\"," +
+  "\"summary\":\"2 sentence summary\"," +
+  "\"score\":1," +
+  "\"guidance\":null," +
+  "\"catalysts\":{" +
+  "\"oilSupplyShock\":false," +        // Active supply disruption: OPEC cuts, Middle East conflict blocking supply routes, pipeline outage
+  "\"oilSupplyUnwind\":false," +       // Supply disruption ENDING: ceasefire, deal, reopening, de-escalation removes premium
+  "\"geopoliticalEscalation\":false," + // Active military conflict, attacks, invasion, missile strikes, war escalating
+  "\"geopoliticalDeEscalation\":false," + // Conflict ENDING or reducing: ceasefire, peace deal, withdrawal, hostilities paused
+  "\"fedHawkish\":false," +            // Fed signaling higher rates, delays cuts, higher-for-longer, hawkish tone
+  "\"fedDovish\":false," +             // Fed signaling cuts, pivot, easing, accommodative
+  "\"inflationHot\":false," +          // CPI/PCE/PPI above expectations, inflation accelerating
+  "\"inflationCool\":false," +         // CPI/PCE/PPI below expectations, inflation decelerating
+  "\"laborStrong\":false," +           // NFP beat, jobless claims low, strong employment
+  "\"laborWeak\":false," +             // NFP miss, jobless claims high, weak employment
+  "\"chinaStimulus\":false," +         // PBOC action, Chinese stimulus, infrastructure spending, demand boost
+  "\"gF\":false," +           // Recession fears, demand destruction, global slowdown
+  "\"riskOn\":false," +                // Risk appetite rising, equities bid, safe havens sold
+  "\"riskOff\":false" +                // Risk appetite falling, safe havens bid, equities sold
+  "}}"
 ].join(" ");
 
 const EARN_PROMPT = [
@@ -653,7 +674,29 @@ const EARN_PROMPT = [
   // ── MODIFIED: tightened staleness rule — stale reports omitted entirely ──
   "STALENESS RULE: Reports are scored ONLY within a strict time window. [TODAY] BMO (before market open) reports: score only if current time is before 10:00am ET. [TODAY] AMC (after market close) reports: score only after 4:00pm ET on that day. [YEST] reports: score ONLY if current time is before 10:00am ET on the NEXT trading day — i.e. the morning after they reported. If current time is past 10:00am ET, [YEST] reports are fully priced in and MUST be completely ignored — set score to 0 and do not mention them. CRITICAL: A report from 2, 3, 4 or more days ago (e.g. AVGO reported June 3 and today is June 8) is ANCIENT — it is NOT [YEST], it has zero scoring weight, and must not appear in your analysis under any circumstances. Only reports from TODAY or genuinely YESTERDAY count. If no valid in-window reports exist, score 0 neutral and state that no scoreable earnings exist today.",
   // ── MODIFIED: explicit JSON schema requiring guidance field ──
-  "JSON SCHEMA: {\"signal\":\"bull|bear|neutral\",\"summary\":\"2 sentence summary\",\"score\":1,\"guidance\":\"One sentence on forward guidance vs consensus — include specific numbers if available (e.g. Q3 revenue guided $X vs $Y consensus). Set to null only if absolutely no guidance data is present in the source material.\"}"
+  "GUIDANCE FIELD: One sentence on forward guidance vs consensus with specific numbers if available. Set to null only if absolutely no guidance data present. " +
+  "CATALYST FLAGS: After scoring, you must also identify which specific catalysts are present in the data. Set each flag to true or false based on what you actually read — do not infer or assume. These flags drive commodity and instrument scoring downstream so accuracy matters. " +
+  "JSON SCHEMA: {" +
+  "\"signal\":\"bull|bear|neutral\"," +
+  "\"summary\":\"2 sentence summary\"," +
+  "\"score\":1," +
+  "\"guidance\":null," +
+  "\"catalysts\":{" +
+  "\"oilSupplyShock\":false," +        // Active supply disruption: OPEC cuts, Middle East conflict blocking supply routes, pipeline outage
+  "\"oilSupplyUnwind\":false," +       // Supply disruption ENDING: ceasefire, deal, reopening, de-escalation removes premium
+  "\"geopoliticalEscalation\":false," + // Active military conflict, attacks, invasion, missile strikes, war escalating
+  "\"geopoliticalDeEscalation\":false," + // Conflict ENDING or reducing: ceasefire, peace deal, withdrawal, hostilities paused
+  "\"fedHawkish\":false," +            // Fed signaling higher rates, delays cuts, higher-for-longer, hawkish tone
+  "\"fedDovish\":false," +             // Fed signaling cuts, pivot, easing, accommodative
+  "\"inflationHot\":false," +          // CPI/PCE/PPI above expectations, inflation accelerating
+  "\"inflationCool\":false," +         // CPI/PCE/PPI below expectations, inflation decelerating
+  "\"laborStrong\":false," +           // NFP beat, jobless claims low, strong employment
+  "\"laborWeak\":false," +             // NFP miss, jobless claims high, weak employment
+  "\"chinaStimulus\":false," +         // PBOC action, Chinese stimulus, infrastructure spending, demand boost
+  "\"gF\":false," +           // Recession fears, demand destruction, global slowdown
+  "\"riskOn\":false," +                // Risk appetite rising, equities bid, safe havens sold
+  "\"riskOff\":false" +                // Risk appetite falling, safe havens bid, equities sold
+  "}}"
 ].join(" ");
 
 const PREMARKET_PROMPT = [
@@ -679,7 +722,28 @@ const NEWS_PROMPT = [
   "HAWKISH RULE: If the dominant news is rate-cut delays, higher-for-longer Fed narrative, or yields rising on economic strength, score BEARISH (-1). This is unambiguous bearish for growth equities regardless of any positive geopolitical or commodity offsets.",
   "IMPORTANT: Do NOT include level labels like Level 3 or Level 4 in your summary text. Write natural plain English.",
   "Score: bull=1, bear=-1, neutral=0. Reserve neutral ONLY for days with genuinely no directional catalyst — not for days where competing stories exist.",
-  "JSON SCHEMA: {\"signal\":\"bull|bear|neutral\",\"summary\":\"2 sentence summary\",\"score\":1,\"guidance\":null}"
+  "CATALYST FLAGS: After scoring, you must also identify which specific catalysts are present in the data. Set each flag to true or false based on what you actually read — do not infer or assume. These flags drive commodity and instrument scoring downstream so accuracy matters. " +
+  "JSON SCHEMA: {" +
+  "\"signal\":\"bull|bear|neutral\"," +
+  "\"summary\":\"2 sentence summary\"," +
+  "\"score\":1," +
+  "\"guidance\":null," +
+  "\"catalysts\":{" +
+  "\"oilSupplyShock\":false," +        // Active supply disruption: OPEC cuts, Middle East conflict blocking supply routes, pipeline outage
+  "\"oilSupplyUnwind\":false," +       // Supply disruption ENDING: ceasefire, deal, reopening, de-escalation removes premium
+  "\"geopoliticalEscalation\":false," + // Active military conflict, attacks, invasion, missile strikes, war escalating
+  "\"geopoliticalDeEscalation\":false," + // Conflict ENDING or reducing: ceasefire, peace deal, withdrawal, hostilities paused
+  "\"fedHawkish\":false," +            // Fed signaling higher rates, delays cuts, higher-for-longer, hawkish tone
+  "\"fedDovish\":false," +             // Fed signaling cuts, pivot, easing, accommodative
+  "\"inflationHot\":false," +          // CPI/PCE/PPI above expectations, inflation accelerating
+  "\"inflationCool\":false," +         // CPI/PCE/PPI below expectations, inflation decelerating
+  "\"laborStrong\":false," +           // NFP beat, jobless claims low, strong employment
+  "\"laborWeak\":false," +             // NFP miss, jobless claims high, weak employment
+  "\"chinaStimulus\":false," +         // PBOC action, Chinese stimulus, infrastructure spending, demand boost
+  "\"gF\":false," +           // Recession fears, demand destruction, global slowdown
+  "\"riskOn\":false," +                // Risk appetite rising, equities bid, safe havens sold
+  "\"riskOff\":false" +                // Risk appetite falling, safe havens bid, equities sold
+  "}}"
 ].join(" ");
 
 // ── Make.com intake endpoint ──────────────────────────────────
@@ -1054,43 +1118,74 @@ function scoreInstruments(econ, earn, premarket, news, metaScore, regime) {
   const earnScore  = earn      ? parseFloat(earn.score)      || 0 : 0;
   const overallWS  = metaScore ? parseFloat(metaScore.weightedScore) || 0 : 0;
 
-  // ── News text analysis — detect commodity/geopolitical specific catalysts ──
-  // These override macro signal rules for commodity instruments
-  const newsText = ((news ? news.summary : "") + " " + (news ? news.guidance||"" : "")).toLowerCase();
-  const econText = ((econ ? econ.summary : "")).toLowerCase();
-  const allText  = newsText + " " + econText;
+  // ── Structured catalyst flags — read from card results (Claude-identified) ──
+  // Primary source: catalysts field from news and econ cards (set by Claude during analysis)
+  // Fallback: regex on text for backwards compatibility with cached/old results
+  function getCat(card, key) {
+    return card && card.catalysts && card.catalysts[key] === true;
+  }
 
-  // ── De-escalation detection — MUST come before crisis detection ──
-  // If the dominant narrative is resolution/de-escalation, crisis overrides are CANCELLED
-  const deEscalation = /ceasefire|de-escalat|end of operation|peace deal|truce|withdrawal|tensions eas|risk premium.*fad|premium.*unwind|premium.*dissipat|geopolit.*eas|geopolit.*resol|iran.*end|israel.*end|end.*military|hostilities.*end/.test(allText);
+  // Merge catalysts from both news and econ cards — either source can set a flag
+  const newsCats = (news && news.catalysts) || {};
+  const econCats = (econ && econ.catalysts) || {};
+  const mergedCats = Object.assign({}, econCats, newsCats,
+    // OR merge: if either card says true, result is true
+    Object.keys(Object.assign({}, econCats, newsCats)).reduce((acc, k) => {
+      acc[k] = !!(econCats[k] || newsCats[k]);
+      return acc;
+    }, {})
+  );
 
-  // Oil-specific catalysts (supply shock = bull for CL regardless of macro)
-  // De-escalation cancels the supply shock — geopolitical premium fading = bearish for CL
-  const oilSupplyShockActive = /middle east|iran|israel|opec cut|supply shock|pipeline|strait of hormuz|houthi|saudi|oil supply|crude supply|production cut/.test(allText);
-  const oilSupplyShock = oilSupplyShockActive && !deEscalation; // cancelled if de-escalating
-  const oilSupplyUnwind = oilSupplyShockActive && deEscalation; // premium FADING = bearish catalyst
-  const oilDemandDestruction = /recession|demand destruction|demand collapse|global slowdown/.test(allText);
+  // ── Primary: structured catalyst flags ──
+  const oilSupplyShock     = !!(mergedCats.oilSupplyShock);
+  const oilSupplyUnwind    = !!(mergedCats.oSU);
+  const geopoliticalCrisis = !!(mergedCats.geopoliticalEscalation);
+  const geopoliticalUnwind = !!(mergedCats.geopoliticalDeEscalation);
+  const inflationFears     = !!(mergedCats.inflationHot);
+  const fedPivot           = !!(mergedCats.fedDovish);
+  const chinaStimulus      = !!(mergedCats.chinaStimulus);
+  const globalGrowthPositive = false; // not yet in schema — extend later
+  const oilDemandDestruction = !!(mergedCats.gF);
+  const ngCatalystFlag     = false; // NG remains neutral unless specifically flagged — extend later
+  const ngBull = false;
+  const ngBear = false;
 
-  // Gold-specific catalysts
-  // De-escalation cancels geopolitical safe-haven bid
-  const geopoliticalCrisisActive = /war|military|attack|invasion|missile|escalat|crisis|conflict|iran|russia|north korea|terror/.test(allText);
-  const geopoliticalCrisis = geopoliticalCrisisActive && !deEscalation; // active crisis only
-  const geopoliticalUnwind = geopoliticalCrisisActive && deEscalation;  // risk premium fading = bear for GC
-  const inflationFears = /inflation|cpi|pce|price pressure|inflationary/.test(allText);
-  const fedPivot = /fed cut|rate cut|pivot|dovish|easing|accommodative/.test(allText);
+  // ── Fallback: regex on text (for old cached results without catalysts field) ──
+  const hasCatalysts = news && news.catalysts !== undefined;
+  if (!hasCatalysts) {
+    const newsText = ((news ? news.summary : "") + " " + (news ? news.guidance||"" : "")).toLowerCase();
+    const econText = ((econ ? econ.summary : "")).toLowerCase();
+    const allText  = newsText + " " + econText;
+    const deEsc = /ceasefire|de-escalat|end of operation|peace deal|truce|withdrawal|tensions eas|premium.*fad|geopolit.*eas|iran.*end|israel.*end|end.*military/.test(allText);
+    Object.assign(mergedCats, {
+      oilSupplyShock:          /middle east|iran|israel|opec cut|supply shock|houthi|oil supply|production cut/.test(allText) && !deEsc,
+      oilSupplyUnwind:         /middle east|iran|israel|opec cut|supply shock|houthi|oil supply|production cut/.test(allText) && deEsc,
+      geopoliticalEscalation:  /war|military|attack|invasion|missile|escalat|crisis|conflict|iran|russia|terror/.test(allText) && !deEsc,
+      geopoliticalDeEscalation:/ceasefire|de-escalat|end of operation|peace deal|truce|withdrawal|tensions eas/.test(allText),
+      fedDovish:               /fed cut|rate cut|pivot|dovish|easing|accommodative/.test(allText),
+      inflationHot:            /inflation|cpi|pce|price pressure|inflationary/.test(allText),
+      chinaStimulus:           /china stimulus|pboc|china growth|chinese demand/.test(allText),
+      gF:             /recession|demand destruction|demand collapse|global slowdown/.test(allText),
+    });
+  }
 
-  // Copper/industrial metals catalysts
-  const chinaStimulus = /china stimulus|pboc|china growth|chinese demand|infrastructure spend/.test(allText);
-  const globalGrowthPositive = /global growth|manufacturing boom|industrial demand|trade expansion/.test(allText);
+  // Re-assign from merged (covers both structured and fallback paths)
+  const _oilSupplyShock     = !!(mergedCats.oilSupplyShock     ?? oilSupplyShock);
+  const _oilSupplyUnwind    = !!(mergedCats.oilSupplyUnwind    ?? oSU);
+  const _geoCrisis          = !!(mergedCats.geopoliticalEscalation ?? geopoliticalCrisis);
+  const _geoUnwind          = !!(mergedCats.geopoliticalDeEscalation ?? geopoliticalUnwind);
+  const _inflationFears     = !!(mergedCats.inflationHot       ?? inflationFears);
+  const _fedPivot           = !!(mergedCats.fedDovish          ?? fP);
+  const _chinaStimulus      = !!(mergedCats.chinaStimulus      ?? chinaStimulus);
+  const _gF        = !!(mergedCats.gF        ?? oilDemandDestruction);
+  const _industrialPos      = _cS || iP;
+  const _industrialNeg      = _gF;
 
-  // Silver catalysts (solar, EV, industrial)
-  const industrialDemandPositive = (chinaStimulus || globalGrowthPositive);
-  const industrialDemandNegative = oilDemandDestruction || /manufacturing contraction|industrial slowdown/.test(allText);
-
-  // Natural gas catalysts
-  const ngCatalyst = /natural gas|lng|gas storage|heating demand|cooling demand|gas supply|gas pipeline/.test(allText);
-  const ngBull = ngCatalyst && /shortage|cold|heat wave|demand surge|export|cut/.test(allText);
-  const ngBear = ngCatalyst && /glut|mild|warm|oversupply|storage build/.test(allText);
+  // Remap to variable names used by rest of function
+  // (so we don't need to rename every reference below)
+  const [oSS, oSU, gC, gU, iF, fP, cS, gF, iP, iN] =
+    [_oilSupplyShock, _oilSupplyUnwind, _geoCrisis, _geoUnwind,
+     _inflationFears, _fedPivot, _chinaStimulus, _gF, _industrialPos, _industrialNeg];
 
   // ── RAW econ direction — independent of regime flip ──
   // Use the passed-in regime object (not module-level cache) to determine
@@ -1152,14 +1247,14 @@ function scoreInstruments(econ, earn, premarket, news, metaScore, regime) {
   // GC: geopolitical unwind is an explicit BEARISH catalyst — safe-haven premium fading
   // De-escalation overrides the riskOff/riskOn macro logic for gold specifically
   let gcBias;
-  if (geopoliticalUnwind && riskOn)                     gcBias = "bear";    // crisis over + risk-on = double pressure on gold
-  else if (geopoliticalUnwind && !riskOff)              gcBias = "bear";    // safe-haven bid unwinding
-  else if (geopoliticalUnwind && riskOff)               gcBias = "neutral"; // unwind but some risk-off remains — mixed
-  else if (geopoliticalCrisis && riskOff && !dollarStrong) gcBias = "bull"; // active crisis + no dollar headwind
-  else if (geopoliticalCrisis && dollarStrong && yieldsRising) gcBias = "neutral"; // crisis vs dollar/yields
-  else if (geopoliticalCrisis && dollarStrong)          gcBias = "neutral"; // competing forces
-  else if (inflationFears && !dollarStrong)             gcBias = "bull";    // inflation hedge
-  else if (fedPivot)                                    gcBias = "bull";    // dovish Fed
+  if (gU && riskOn)                     gcBias = "bear";    // crisis over + risk-on = double pressure on gold
+  else if (gU && !riskOff)              gcBias = "bear";    // safe-haven bid unwinding
+  else if (gU && riskOff)               gcBias = "neutral"; // unwind but some risk-off remains — mixed
+  else if (gC && riskOff && !dollarStrong) gcBias = "bull"; // active crisis + no dollar headwind
+  else if (gC && dollarStrong && yieldsRising) gcBias = "neutral"; // crisis vs dollar/yields
+  else if (gC && dollarStrong)          gcBias = "neutral"; // competing forces
+  else if (iF && !dollarStrong)             gcBias = "bull";    // inflation hedge
+  else if (fP)                                    gcBias = "bull";    // dovish Fed
   else if (dollarStrong && yieldsRising)                gcBias = "bear";    // yields + dollar dominate
   else if (dollarStrong && riskOff)                     gcBias = "neutral"; // competing forces
   else if (riskOff && !dollarStrong)                    gcBias = "bull";    // safe-haven bid
@@ -1170,20 +1265,20 @@ function scoreInstruments(econ, earn, premarket, news, metaScore, regime) {
   // SI: follows GC direction + amplified by industrial demand
   // Geopolitical unwind hurts silver more than gold (both precious AND industrial demand weakens)
   let siBias;
-  if (geopoliticalUnwind && riskOn)                                     siBias = "bear";   // double headwind: safe-haven + industrial risk-on flows away
+  if (gU && riskOn)                                     siBias = "bear";   // double headwind: safe-haven + industrial risk-on flows away
   else if (gcBias === "bear")                                           siBias = "bear";
-  else if (gcBias === "bull" && industrialDemandPositive)               siBias = "bull";
-  else if (gcBias === "bull" && !growthFears && !industrialDemandNegative) siBias = "bull";
-  else if (gcBias === "bull" && (growthFears || industrialDemandNegative)) siBias = "neutral";
-  else if (gcBias === "neutral" && (growthFears || industrialDemandNegative)) siBias = "bear";
-  else if (gcBias === "neutral" && industrialDemandPositive)            siBias = "bull";
+  else if (gcBias === "bull" && iP)               siBias = "bull";
+  else if (gcBias === "bull" && !catGrowthFears && !iN) siBias = "bull";
+  else if (gcBias === "bull" && (catGrowthFears || iN)) siBias = "neutral";
+  else if (gcBias === "neutral" && (catGrowthFears || iN)) siBias = "bear";
+  else if (gcBias === "neutral" && iP)            siBias = "bull";
   else                                                                  siBias = "neutral";
 
   // HG: industrial/growth driven — China stimulus or global growth = bull
   // Geopolitical risk is indirect for copper (demand matters more than supply)
   let hgBias;
-  if (chinaStimulus || globalGrowthPositive)   hgBias = "bull";    // direct demand catalyst
-  else if (growthFears || asiaWeak)            hgBias = "bear";    // demand destruction
+  if (cS || iP)   hgBias = "bull";    // direct demand catalyst
+  else if (catGrowthFears || asiaWeak)            hgBias = "bear";    // demand destruction
   else if (riskOn && asiaStrong)               hgBias = "bull";
   else                                         hgBias = "neutral";
 
@@ -1193,7 +1288,7 @@ function scoreInstruments(econ, earn, premarket, news, metaScore, regime) {
   const plMetals = gcBias === "bull" ? 1 : gcBias === "bear" ? -1 : 0;
   const plIndust = hgBias === "bull" ? 1 : hgBias === "bear" ? -1 : 0;
   // Geopolitical crisis: reduce precious metal component for PL (less safe-haven than GC)
-  const plGeoAdj = (geopoliticalCrisis && gcBias === "bull") ? -0.2 : 0; // crisis inflates GC but not PL as much
+  const plGeoAdj = (gC && gcBias === "bull") ? -0.2 : 0; // crisis inflates GC but not PL as much
   const plScore  = (plMetals * 0.5) + (plIndust * 0.5) + plGeoAdj;
   const plBias   = sig(plScore);
 
@@ -1201,10 +1296,10 @@ function scoreInstruments(econ, earn, premarket, news, metaScore, regime) {
   // CL: geopolitical supply shock = bull, but de-escalation (supply unwind) = explicitly BEARISH
   // The removal of a risk premium is itself a directional catalyst — not neutral
   let clBias;
-  if (oilSupplyUnwind)                                 clBias = "bear";    // geopolitical premium fading = supply bid removed
-  else if (oilSupplyShock && !oilDemandDestruction)    clBias = "bull";    // active supply shock dominates
-  else if (oilSupplyShock && oilDemandDestruction)     clBias = "neutral"; // supply shock vs demand destruction
-  else if (oilDemandDestruction || growthFears)        clBias = "bear";    // demand destruction
+  if (oSU)                                 clBias = "bear";    // geopolitical premium fading = supply bid removed
+  else if (oSS && !catGrowthFears)    clBias = "bull";    // active supply shock dominates
+  else if (oSS && catGrowthFears)     clBias = "neutral"; // supply shock vs demand destruction
+  else if (gF || gF)        clBias = "bear";    // demand destruction
   else if (riskOn && dollarWeak)                       clBias = "bull";    // risk-on + weak dollar
   else if (riskOff && dollarStrong)                    clBias = "bear";    // macro bearish
   else if (dollarStrong)                               clBias = "bear";
@@ -1226,12 +1321,12 @@ function scoreInstruments(econ, earn, premarket, news, metaScore, regime) {
   let dxyBias;
   if      (econDataStrong && riskOff)                                  dxyBias = "bull";     // strong data + safety bid
   else if (econDataStrong)                                             dxyBias = "bull";     // rate premium drives dollar
-  else if (geopoliticalCrisis && riskOff && !econDataWeak)             dxyBias = "bull";     // flight to safety into USD during crisis
+  else if (gC && riskOff && !econDataWeak)             dxyBias = "bull";     // flight to safety into USD during crisis
   else if (econIsNeutral && newsSig === "bear" && preSig === "bear")   dxyBias = "bull";     // prior strong data echo
   else if (econDataWeak && riskOn)                                     dxyBias = "bear";     // weak data + risk-on = dollar sold
   else if (econDataWeak)                                               dxyBias = "bear";     // rate cut expectations
   else if (econIsNeutral && newsSig === "bull" && preSig === "bull")   dxyBias = "bear";     // risk-on, no data support
-  else if (oilSupplyShock && !econDataStrong && !geopoliticalCrisis)   dxyBias = "neutral";  // oil shock without macro driver = mixed dollar signal
+  else if (oSS && !econDataStrong && !gC)   dxyBias = "neutral";  // oil shock without macro driver = mixed dollar signal
   else if (riskOff)                                                    dxyBias = "neutral";  // safety bid but no clear direction
   else                                                                 dxyBias = "neutral";
 
