@@ -234,10 +234,11 @@ async function fetchPremarket() {
     return null; // null triggers web search fallback in the analyze endpoint
   }
 
-  // Monday before 3am ET — Asia trading, Europe not yet open
-  // Finnhub ETFs still won't be live — use web search
-  if (dayOfWeek === 1 && hourET < 3) {
-    console.log("Premarket: Monday pre-Europe — Asia trading, using web search");
+  // Monday before US market open (9:30am ET) — ETF proxies don't reflect overnight moves
+  // Asian markets closed hours ago, European markets are open but ETFs don't trade yet
+  // Use web search for real overnight data through the full pre-market window
+  if (dayOfWeek === 1 && hourET < 10) {
+    console.log("Premarket: Monday pre-open (" + hourET + "h ET) — using web search for overnight data");
     return null; // null triggers web search fallback
   }
 
@@ -626,7 +627,7 @@ const EARN_PROMPT = [
   "SUMMARY RULE: For any mega-cap result, your summary must include: (1) EPS beat/miss, (2) revenue beat/miss, (3) forward guidance vs consensus if available, (4) any key metric like AI revenue, cloud growth, or segment performance that moves NQ/ES.",
   "Score: bull=1, bear=-1, neutral=0. You may use 0.5 increments when guidance meaningfully changes the picture.",
   // ── MODIFIED: tightened staleness rule — stale reports omitted entirely ──
-  "STALENESS RULE: If current time is past 10:00am ET, any report tagged [YEST] is fully priced in and must be completely ignored — do NOT mention it, do NOT reference it as context, do NOT let it influence your signal or summary in any way. Treat [YEST] reports as if they do not exist after 10:00am ET. Base your entire analysis only on [TODAY] reports. If there are no [TODAY] reports with confirmed actuals, score 0 neutral. [YEST] reports only score and appear in your summary if current time is before 10:00am ET.",
+  "STALENESS RULE: Reports are scored ONLY within a strict time window. [TODAY] BMO (before market open) reports: score only if current time is before 10:00am ET. [TODAY] AMC (after market close) reports: score only after 4:00pm ET on that day. [YEST] reports: score ONLY if current time is before 10:00am ET on the NEXT trading day — i.e. the morning after they reported. If current time is past 10:00am ET, [YEST] reports are fully priced in and MUST be completely ignored — set score to 0 and do not mention them. CRITICAL: A report from 2, 3, 4 or more days ago (e.g. AVGO reported June 3 and today is June 8) is ANCIENT — it is NOT [YEST], it has zero scoring weight, and must not appear in your analysis under any circumstances. Only reports from TODAY or genuinely YESTERDAY count. If no valid in-window reports exist, score 0 neutral and state that no scoreable earnings exist today.",
   // ── MODIFIED: explicit JSON schema requiring guidance field ──
   "JSON SCHEMA: {\"signal\":\"bull|bear|neutral\",\"summary\":\"2 sentence summary\",\"score\":1,\"guidance\":\"One sentence on forward guidance vs consensus — include specific numbers if available (e.g. Q3 revenue guided $X vs $Y consensus). Set to null only if absolutely no guidance data is present in the source material.\"}"
 ].join(" ");
@@ -801,14 +802,21 @@ app.post("/api/analyze", async function(req, res) {
           let searchCtx = "";
           if (dayET === 0 && hourET2 >= 17) {
             searchCtx = " It is Sunday evening ET — Asian markets are opening or in early session. Search for LIVE current performance of: HSI (Hang Seng), Nikkei 225, ASX 200 (Australia), Shanghai Composite, STI (Singapore). State current % change for each. Also check if US index futures (NQ, ES) are showing any direction in overnight trading.";
-          } else if (dayET === 1 && hourET2 < 3) {
-            searchCtx = " It is early Monday morning ET — Asian markets are trading, European markets have not opened yet. Search for LIVE current performance of: HSI, Nikkei, ASX 200, Shanghai, STI. State current % change for each. Note European markets open at approximately 3am ET.";
+          } else if (dayET === 1 && hourET2 < 10) {
+            // Monday pre-open — covers 12am-9:30am ET window
+            if (hourET2 < 3) {
+              searchCtx = " It is early Monday morning ET — Asian markets are trading, European markets not yet open (~3am ET open). Search for LIVE overnight performance of: HSI, Nikkei 225, ASX 200, Shanghai Composite, STI. State current % change for each.";
+            } else if (hourET2 < 9) {
+              searchCtx = " It is Monday morning ET, European markets are now open. Search for current performance of: HSI (final close), Nikkei (final close), ASX 200 (final close), Shanghai (final close), STI (final close). Also STOXX 600, DAX, FTSE 100, AEX, CAC 40 current levels. US futures (NQ, ES) pre-market direction.";
+            } else {
+              searchCtx = " It is Monday pre-market ET (after 9am). Asian markets have closed, European markets are trading. Search for: Asia final closes (HSI, Nikkei, ASX, Shanghai, STI), Europe current levels (STOXX 600, DAX, FTSE, AEX, CAC), and US futures (NQ, ES) pre-market direction right now.";
+            }
           } else {
             searchCtx = " Search the web for today " + todayStr2 + " pre-market performance of: HSI (Hang Seng), Nikkei 225, ASX 200, Shanghai Composite, STI. Also STOXX 600, DAX, FTSE 100, AEX, CAC 40. Also NQ futures, ES futures, DOW futures. State % change for each.";
           }
           prompt = PREMARKET_PROMPT + searchCtx;
           useSearch = true;
-          console.log("Premarket: using web search —", dayET === 0 ? "Sunday evening" : dayET === 1 && hourET2 < 3 ? "Monday pre-Europe" : "Finnhub fallback");
+          console.log("Premarket: using web search —", dayET === 0 ? "Sunday evening" : dayET === 1 && hourET2 < 10 ? "Monday pre-open (" + hourET2 + "h ET)" : "Finnhub fallback");
         }
       }
     } else if (topic === "news") {
@@ -2028,10 +2036,25 @@ async function fetchLivePrices() {
   return results;
 }
 
+// Cache market prices for 60 seconds to avoid hitting rate limits on repeated calls
+var marketPriceCache = { prices: null, fetchedAt: 0 };
+
 app.get("/api/market-prices", async function(req, res) {
   try {
+    const now = Date.now();
+    const age = now - marketPriceCache.fetchedAt;
+    const force = req.query.force === "1";
+
+    // Return cache if less than 60 seconds old (unless forced)
+    if (!force && marketPriceCache.prices && age < 60000) {
+      console.log("Market prices: serving from cache (age " + Math.round(age/1000) + "s)");
+      return res.json({ prices: marketPriceCache.prices, timestamp: new Date(marketPriceCache.fetchedAt).toISOString(), cached: true });
+    }
+
+    console.log("Market prices: fetching fresh data...");
     const prices = await fetchLivePrices();
-    res.json({ prices, timestamp: new Date().toISOString() });
+    marketPriceCache = { prices, fetchedAt: now };
+    res.json({ prices, timestamp: new Date().toISOString(), cached: false });
   } catch(e) {
     console.error("Market prices error:", e.message);
     res.status(500).json({ error: e.message });
