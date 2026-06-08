@@ -1094,18 +1094,39 @@ async function runAll(){
       lastMetaScore = metaData;
       WEIGHTS = metaData.weights;
 
+      // Determine if US session is open — premarket score zeroed after 9:30am ET
+      var etNow = new Date();
+      var etHour = parseInt(etNow.toLocaleString('en-US',{hour:'2-digit',hour12:false,timeZone:'America/New_York'}));
+      var etMin  = etNow.getMinutes();
+      var etDay  = etNow.toLocaleDateString('en-US',{weekday:'short',timeZone:'America/New_York'});
+      var sessionOpen = !['Sat','Sun'].includes(etDay) && (etHour > 9 || (etHour === 9 && etMin >= 30));
+
       // Update weight labels and pts on each card
       ['econ','earn','premarket','news'].forEach(function(k) {
         var wtEl = document.getElementById('wt-' + k);
         var w = metaData.weights[k] || 1;
         var stars = Array(w+1).join('★');
         if (wtEl) wtEl.textContent = 'Weight: ' + w + '×  ' + stars;
-        var sc = scores[k] || 0;
+        // After open, premarket score is zeroed server-side — reflect in pts display
+        var sc = (k === 'premarket' && sessionOpen) ? 0 : (scores[k] || 0);
         var pts = sc * w;
         var ptsEl = document.getElementById('pts-' + k);
         if (ptsEl) {
           ptsEl.textContent = (pts >= 0 ? '+' : '') + pts.toFixed(1);
-          ptsEl.className = 'card-pts ' + (pts > 0 ? 'pts-bull' : pts < 0 ? 'pts-bear' : 'pts-neu');
+          ptsEl.className = 'card-pts pts-neu'; // always neutral color when zeroed
+          if (pts > 0) ptsEl.className = 'card-pts pts-bull';
+          else if (pts < 0) ptsEl.className = 'card-pts pts-bear';
+        }
+        // Add AT OPEN badge to premarket card footer after session starts
+        if (k === 'premarket' && sessionOpen && ptsEl) {
+          var footer = ptsEl.parentElement;
+          if (footer && !footer.querySelector('.at-open-badge')) {
+            var badge = document.createElement('span');
+            badge.className = 'at-open-badge';
+            badge.textContent = 'AT OPEN ✓';
+            badge.style.cssText = 'font-size:9px;padding:1px 6px;border-radius:2px;background:rgba(74,86,104,0.2);color:var(--muted);border:1px solid var(--border2);letter-spacing:0.06em;margin-left:4px;';
+            footer.appendChild(badge);
+          }
         }
       });
 
