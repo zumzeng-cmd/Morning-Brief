@@ -1043,12 +1043,24 @@ app.post("/api/meta-score", async function(req, res) {
     const isWeekday  = etDayMeta >= 1 && etDayMeta <= 5;
     const afterOpen  = isWeekday && (etHourMeta > 9 || (etHourMeta === 9 && etMinMeta >= 30));
     // Get scores from request body — must be before weight cap logic
+    // After US open (9:30am ET), zero out premarket score — overnight data no longer
+    // affects aggregate bias; card text and signal remain for context only
+    const etNowScores = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
+    const etHourScores = etNowScores.getHours();
+    const etMinScores  = etNowScores.getMinutes();
+    const etDayScores  = etNowScores.getDay();
+    const isWeekdayScores = etDayScores >= 1 && etDayScores <= 5;
+    const afterOpenScores = isWeekdayScores && (etHourScores > 9 || (etHourScores === 9 && etMinScores >= 30));
+
     const cardScores = {
       econ:      econ      ? (parseFloat(econ.score)      || 0) : 0,
       earn:      earn      ? (parseFloat(earn.score)      || 0) : 0,
-      premarket: premarket ? (parseFloat(premarket.score) || 0) : 0,
+      premarket: (premarket && !afterOpenScores) ? (parseFloat(premarket.score) || 0) : 0,
       news:      news      ? (parseFloat(news.score)      || 0) : 0
     };
+    if (afterOpenScores && premarket && parseFloat(premarket.score) !== 0) {
+      console.log("Meta: pre-market score zeroed after open (was " + premarket.score + ") — card text preserved for context");
+    }
 
     if (afterOpen && weights.premarket > 1) {
       weights.premarket = 1;
