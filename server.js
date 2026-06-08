@@ -808,6 +808,13 @@ app.post("/api/analyze", async function(req, res) {
           }
           prompt = PREMARKET_PROMPT + searchCtx;
           useSearch = true;
+          // Wait 65s to clear Anthropic rate limit window if Sonnet was recently used (e.g. earnings web search)
+          const timeSinceLastSonnet = Date.now() - (global.lastSonnetCallMs || 0);
+          if (timeSinceLastSonnet < 65000) {
+            const waitMs = 65000 - timeSinceLastSonnet;
+            console.log("Premarket: waiting " + Math.round(waitMs/1000) + "s for Sonnet rate limit window to reset...");
+            await new Promise(r => setTimeout(r, waitMs));
+          }
           console.log("Premarket: using web search —", dayET === 0 ? "Sunday evening" : dayET === 1 && hourET2 < 3 ? "Monday pre-Europe" : "Finnhub fallback");
         }
       }
@@ -820,6 +827,8 @@ app.post("/api/analyze", async function(req, res) {
       return res.status(400).json({ error: "Unknown topic" });
     }
 
+    // Track last Sonnet web search time for rate limit management
+    if (useSearch) global.lastSonnetCallMs = Date.now();
     const result = await callClaudeWithRetry(prompt, rawData, useSearch);
     console.log("Result for " + topic + ":", JSON.stringify(result));
     res.json(result);
