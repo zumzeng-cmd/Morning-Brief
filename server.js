@@ -1126,7 +1126,8 @@ const MARKETS_PROMPT = [
   "You are a senior futures trader. Based on the morning brief signals below, write ONE specific implication sentence and ONE key level for each instrument.",
   "INSTRUMENTS: ES, NQ, YM, RTY (equities), GC, SI, HG, PL (metals), CL, NG (energies), DXY.",
   "FOR EACH INSTRUMENT provide ONLY:",
-  "1. implication: ONE sentence on what today's specific drivers mean for this instrument. Name the actual catalyst (e.g. oil supply shock from Middle East war, geopolitical escalation, yield spike, dollar strength, Asia weakness). CRITICAL: Your sentence MUST reflect the instrument's actual price direction — if crude oil is rising due to a supply shock, say it is under upward pressure. If gold has a safe-haven bid competing with dollar strength, explain the tension. Be directionally accurate and specific.",
+  "1. implication: ONE sentence on what today's specific drivers mean for this instrument. Name the actual catalyst (e.g. oil supply shock from Middle East war, geopolitical escalation, yield spike, dollar strength, Asia weakness). CRITICAL: Your sentence MUST reflect the instrument's actual price direction — if crude oil is rising due to geopolitical risk, say it is under upward pressure from supply risk premium. If gold has a safe-haven bid competing with dollar strength, explain the tension. Be directionally accurate and specific.",
+  "NATURAL GAS SPECIAL RULE: NG (Natural Gas) is driven by weather, storage reports, and LNG demand — NOT by macro conditions, geopolitics, or equity sentiment. For NG, ONLY reference actual NG-specific catalysts (storage builds/draws, heating/cooling demand, LNG exports, pipeline issues). If no NG-specific catalyst exists today, write: 'Natural gas lacks a directional catalyst today — price action will be driven by technicals and the next storage report.' Do NOT mention risk-off, Asia weakness, or rate policy for NG.",
   "2. keyLevel: the single most important price level or zone to watch today, as a string (e.g. '5250' or '19200-19400'). Null if genuinely unknown.",
   "DO NOT include bias, signal, bestSetup, setupDirection, or divergence — the server calculates these.",
   "RETURN a JSON object with this exact structure:",
@@ -1293,18 +1294,21 @@ function scoreInstruments(econ, earn, premarket, news, metaScore, regime) {
   const plBias   = sig(plScore);
 
   // ── ENERGIES ──
-  // CL: geopolitical supply shock = bull, but de-escalation (supply unwind) = explicitly BEARISH
-  // The removal of a risk premium is itself a directional catalyst — not neutral
+  // CL: oil is geopolitically driven — escalation creates supply risk premium (bull)
+  // de-escalation removes it (bear). Both override macro signal.
+  // Active geopolitical escalation (Iran-Israel, OPEC threats) = supply risk = BULL
+  // even without confirmed supply disruption — the risk premium IS the trade.
+  const oilGeoRisk = oilSupplyShock || geopoliticalCrisis; // escalation OR confirmed shock
   let clBias;
-  if (oilSupplyUnwind)                                 clBias = "bear";    // geopolitical premium fading = supply bid removed
-  else if (oilSupplyShock && !catGrowthFears)    clBias = "bull";    // active supply shock dominates
-  else if (oilSupplyShock && catGrowthFears)     clBias = "neutral"; // supply shock vs demand destruction
-  else if (catGrowthFears || growthFears)        clBias = "bear";    // demand destruction
-  else if (riskOn && dollarWeak)                       clBias = "bull";    // risk-on + weak dollar
-  else if (riskOff && dollarStrong)                    clBias = "bear";    // macro bearish
-  else if (dollarStrong)                               clBias = "bear";
-  else if (riskOff)                                    clBias = "bear";
-  else                                                 clBias = "neutral";
+  if (oilSupplyUnwind)                                clBias = "bear";    // premium fading = supply bid removed
+  else if (oilGeoRisk && !catGrowthFears)             clBias = "bull";    // geopolitical risk premium drives oil higher
+  else if (oilGeoRisk && catGrowthFears)              clBias = "neutral"; // supply risk vs demand destruction = mixed
+  else if (catGrowthFears || growthFears)             clBias = "bear";    // demand destruction with no supply catalyst
+  else if (riskOn && dollarWeak)                      clBias = "bull";    // risk-on + weak dollar
+  else if (riskOff && dollarStrong)                   clBias = "bear";    // macro bearish, no oil catalyst
+  else if (dollarStrong)                              clBias = "bear";
+  else if (riskOff)                                   clBias = "bear";
+  else                                                clBias = "neutral";
 
   // NG: weather/storage driven — macro-independent unless specific NG catalyst detected
   let ngBias;
