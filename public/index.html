@@ -14,7 +14,7 @@
   --font-display:'Bebas Neue',sans-serif;--font-mono:'DM Mono',monospace;
 }
 body{background:var(--bg);color:var(--text);font-family:var(--font-mono);min-height:100vh;}
-body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);background-size:40px 40px;opacity:0.3;pointer-events:none;z-index:0;}
+/* grid lines removed */
 .wrap{position:relative;z-index:1;padding:1.5rem;max-width:1100px;margin:0 auto;}
 .hdr{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:1.2rem;border-bottom:1px solid var(--border);padding-bottom:1rem;}
 .hdr-title{font-family:var(--font-display);font-size:42px;letter-spacing:2px;color:var(--accent);line-height:1;}
