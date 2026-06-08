@@ -1326,7 +1326,7 @@ const SUMMARY_PROMPT = [
   "PARAGRAPH 1 — THE BIG PICTURE: What is the overall mood in markets today and what is the single most important thing driving it? State the overall bias clearly (e.g. bearish, neutral, bullish) and the primary reason. Use plain language. No ticker symbols in this paragraph.",
   "PARAGRAPH 2 — THE FOUR SIGNALS: Briefly explain what each of the four cards is saying in plain English — (1) what economic data released today means, (2) what earnings are telling us, (3) what overnight global markets (Asia and Europe) did and why, (4) what the key news narrative is. Each signal gets 1 sentence. Connect them to the overall picture.",
   "PARAGRAPH 3 — WHY IT MATTERS: Explain the key cause-and-effect chain for a non-trader. E.g. 'A stronger-than-expected jobs report means the Fed is less likely to cut interest rates soon, which makes borrowing more expensive, which weighs on growth stocks.' Connect the dots clearly.",
-  "PARAGRAPH 4 — WHAT THE MARKETS ARE DOING: Briefly describe what stocks, gold, oil, and the dollar are doing today and why — in plain English. Mention the directional bias for each asset class. Avoid futures codes.",
+  "PARAGRAPH 4 — WHAT THE MARKETS ARE DOING: Briefly describe what stocks, gold, oil, and the dollar are doing today and why — in plain English. Mention the directional bias for each asset class. End this paragraph with the HIGHEST PROBABILITY SETUPS — name the specific markets using their ticker symbol AND full name together (e.g. \'NQ (Nasdaq 100)\', \'CL (Crude Oil)\', \'GC (Gold)\', \'DXY (US Dollar Index)\') and briefly explain why they have the strongest conviction.",
   "PARAGRAPH 5 — WHAT TO WATCH: One or two specific things that could change the picture today or this week. Keep it forward-looking and actionable for a non-trader.",
   "TONE: Conversational, clear, confident. Like a smart friend explaining the news over coffee — not a Bloomberg terminal.",
   "LENGTH: 5 paragraphs, 2-4 sentences each. No headers, no bullet points, no bold text. Just clean readable prose.",
@@ -1361,6 +1361,30 @@ app.post("/api/summary", async function(req, res) {
       markets && markets.metals   ? "Metals — Gold: " + markets.metals.GC.bias + " (" + (markets.metals.GC.implication||"") + "), Silver: " + markets.metals.SI.bias + ", Copper: " + markets.metals.HG.bias : "",
       markets && markets.energies ? "Energy — Oil: " + markets.energies.CL.bias + " (" + (markets.energies.CL.implication||"") + ")" : "",
       markets && markets.dxy      ? "Dollar: " + markets.dxy.DXY.bias + " (" + (markets.dxy.DXY.implication||"") + ")" : "",
+      "",
+      // Best setup instruments — these are flagged as Highest Probability by the server
+      "HIGHEST PROBABILITY SETUPS (for paragraph 4):",
+      (function() {
+        const setups = [];
+        const nameMap = {
+          ES:"ES (S&P 500)", NQ:"NQ (Nasdaq 100)", YM:"YM (Dow Jones)", RTY:"RTY (Russell 2000)",
+          GC:"GC (Gold)", SI:"SI (Silver)", HG:"HG (Copper)", PL:"PL (Platinum)",
+          CL:"CL (Crude Oil)", NG:"NG (Natural Gas)", DXY:"DXY (US Dollar Index)"
+        };
+        if (markets) {
+          const groups = [markets.equities, markets.metals, markets.energies, markets.dxy];
+          groups.forEach(function(g) {
+            if (!g) return;
+            Object.keys(g).forEach(function(ticker) {
+              const inst = g[ticker];
+              if (inst && inst.bestSetup && inst.setupDirection) {
+                setups.push(nameMap[ticker] + ": " + inst.setupDirection + " (" + inst.bias + ") — " + (inst.implication||""));
+              }
+            });
+          });
+        }
+        return setups.length > 0 ? setups.join("\n") : "No clear best setups identified today.";
+      })(),
     ].filter(Boolean).join("\n");
 
     const body = {
@@ -1788,13 +1812,21 @@ async function runBacktestJob(jobId, date) {
 
     // ── Round 3: summary ──
     updateJob("Generating plain-English summary...", 4);
+    // Build best setups list for backtest summary
+    const btNameMap = {ES:"ES (S&P 500)",NQ:"NQ (Nasdaq 100)",YM:"YM (Dow Jones)",RTY:"RTY (Russell 2000)",GC:"GC (Gold)",SI:"SI (Silver)",HG:"HG (Copper)",PL:"PL (Platinum)",CL:"CL (Crude Oil)",NG:"NG (Natural Gas)",DXY:"DXY (US Dollar Index)"};
+    const btSetups = [];
+    [marketScores.equities, marketScores.metals, marketScores.energies, marketScores.dxy].forEach(function(g) {
+      if (!g) return;
+      Object.keys(g).forEach(function(t) { if(g[t]&&g[t].bestSetup&&g[t].setupDirection) btSetups.push((btNameMap[t]||t)+": "+g[t].setupDirection+" ("+g[t].bias+")"); });
+    });
     const sumCtx = ["BACKTEST DATE: " + date, "OVERALL BIAS: " + metaScore.biasLabel, "RATIONALE: " + metaScore.rationale,
       "ECON: " + results.econ.signal.toUpperCase() + " | " + results.econ.summary,
       "EARNINGS: " + results.earn.signal.toUpperCase() + " | " + results.earn.summary,
       "PRE-MARKET: " + results.premarket.signal.toUpperCase() + " | " + results.premarket.summary,
       "NEWS: " + results.news.signal.toUpperCase() + " | " + results.news.summary,
       "Equities: ES="+marketScores.equities.ES.bias+", NQ="+marketScores.equities.NQ.bias,
-      "DXY: "+marketScores.dxy.DXY.bias
+      "DXY: "+marketScores.dxy.DXY.bias,
+      "HIGHEST PROBABILITY SETUPS: " + (btSetups.length > 0 ? btSetups.join(", ") : "None identified")
     ].join("\n");
     const sumBody = { model:"claude-haiku-4-5-20251001", max_tokens:800, temperature:0,
       system:"You are a clear, friendly market commentator. CRITICAL: Reply ONLY with raw JSON, no markdown. This is a historical backtest for " + date + " — write in past tense. Each paragraph must be 2-3 sentences maximum.",
