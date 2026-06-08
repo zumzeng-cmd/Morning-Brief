@@ -507,7 +507,8 @@ app.post("/api/regime/reset", function(req, res) {
 // ── Claude API ────────────────────────────────────────────────
 function callClaude(prompt, data, useWebSearch) {
   return new Promise((resolve, reject) => {
-    const today = new Date().toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
+    // Use ET timezone so day/date matches what traders see
+    const today = new Date().toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric", timeZone:"America/New_York" });
     const body = {
       model: useWebSearch ? "claude-sonnet-4-6" : "claude-haiku-4-5-20251001",
       max_tokens: useWebSearch ? 1000 : 500,  // web search needs more tokens for search results
@@ -539,11 +540,22 @@ function callClaude(prompt, data, useWebSearch) {
             console.log("callClaude: empty text response, stop_reason:", parsed.stop_reason, "content types:", (parsed.content||[]).map(b=>b.type).join(","));
             return resolve({ signal: "neutral", summary: "Could not fetch data. Use override buttons to set manually.", score: 0, guidance: null });
           }
-          // Extract JSON — handle cases where Claude wraps it in preamble text
+          // Extract JSON — handle preamble and nested JSON in web search responses
           let cleaned = text.replace(/```json|```/g, "").trim();
-          // Try to find JSON object if Claude added preamble
-          const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-          if (jsonMatch) cleaned = jsonMatch[0];
+          // Find the LAST JSON object in the response (Claude's answer, not search result snippets)
+          const allMatches = [];
+          const jsonRe = /\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g;
+          let m;
+          while ((m = jsonRe.exec(cleaned)) !== null) allMatches.push(m[0]);
+          // Prefer the match that contains "signal" and "score" fields
+          const validMatch = allMatches.reverse().find(s => s.includes('"signal"') && s.includes('"score"'));
+          if (validMatch) cleaned = validMatch;
+          else {
+            // Fallback: find outermost braces
+            const start = cleaned.indexOf('{');
+            const end = cleaned.lastIndexOf('}');
+            if (start !== -1 && end > start) cleaned = cleaned.slice(start, end + 1);
+          }
           const result = JSON.parse(cleaned);
           // Ensure result has required fields
           if (!result.signal || !result.hasOwnProperty("score")) {
@@ -563,6 +575,25 @@ function callClaude(prompt, data, useWebSearch) {
     req.write(payload);
     req.end();
   });
+}
+
+// ── Rate-limit aware wrapper — retries once after 20s if rate limited ──
+async function callClaudeWithRetry(prompt, data, useWebSearch) {
+  try {
+    return await callClaude(prompt, data, useWebSearch);
+  } catch(e) {
+    if (e.message && e.message.includes("rate limit")) {
+      console.log("Rate limit hit — waiting 20s before retry...");
+      await new Promise(r => setTimeout(r, 20000));
+      try {
+        return await callClaude(prompt, data, useWebSearch);
+      } catch(e2) {
+        console.error("Retry also failed:", e2.message);
+        throw e2;
+      }
+    }
+    throw e;
+  }
 }
 
 // ── Prompts ───────────────────────────────────────────────────
@@ -815,7 +846,7 @@ app.post("/api/analyze", async function(req, res) {
       return res.status(400).json({ error: "Unknown topic" });
     }
 
-    const result = await callClaude(prompt, rawData, useSearch);
+    const result = await callClaudeWithRetry(prompt, rawData, useSearch);
     console.log("Result for " + topic + ":", JSON.stringify(result));
     res.json(result);
   } catch(e) {
