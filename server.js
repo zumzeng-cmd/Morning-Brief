@@ -1921,87 +1921,64 @@ app.get("/api/backtest/history", function(req, res) { res.json(loadBacktestHisto
 // Fetches current price + % change for all traded instruments via Finnhub
 // Used by Markets tab to show live data and relative strength ranking
 const MARKET_SYMBOLS = [
-  { ticker:"ES",  finnhub:"ES=F",  group:"equities", name:"S&P 500 Futures" },
-  { ticker:"NQ",  finnhub:"NQ=F",  group:"equities", name:"Nasdaq 100 Futures" },
-  { ticker:"YM",  finnhub:"YM=F",  group:"equities", name:"Dow Jones Futures" },
-  { ticker:"RTY", finnhub:"RTY=F", group:"equities", name:"Russell 2000 Futures" },
-  { ticker:"GC",  finnhub:"GC=F",  group:"metals",   name:"Gold Futures" },
-  { ticker:"SI",  finnhub:"SI=F",  group:"metals",   name:"Silver Futures" },
-  { ticker:"HG",  finnhub:"HG=F",  group:"metals",   name:"Copper Futures" },
-  { ticker:"PL",  finnhub:"PL=F",  group:"metals",   name:"Platinum Futures" },
-  { ticker:"CL",  finnhub:"CL=F",  group:"energies", name:"Crude Oil Futures" },
-  { ticker:"NG",  finnhub:"NG=F",  group:"energies", name:"Natural Gas Futures" },
-  { ticker:"DXY", finnhub:"DX=F",  group:"dxy",      name:"US Dollar Index" },
+  { ticker:"ES",  finnhub:"ES=F",  td:"ES1!",  group:"equities", name:"S&P 500 Futures" },
+  { ticker:"NQ",  finnhub:"NQ=F",  td:"NQ1!",  group:"equities", name:"Nasdaq 100 Futures" },
+  { ticker:"YM",  finnhub:"YM=F",  td:"YM1!",  group:"equities", name:"Dow Jones Futures" },
+  { ticker:"RTY", finnhub:"RTY=F", td:"RTY1!",  group:"equities", name:"Russell 2000 Futures" },
+  { ticker:"GC",  finnhub:"GC=F",  td:"GC1!",  group:"metals",   name:"Gold Futures" },
+  { ticker:"SI",  finnhub:"SI=F",  td:"SI1!",  group:"metals",   name:"Silver Futures" },
+  { ticker:"HG",  finnhub:"HG=F",  td:"HG1!",  group:"metals",   name:"Copper Futures" },
+  { ticker:"PL",  finnhub:"PL=F",  td:"PL1!",  group:"metals",   name:"Platinum Futures" },
+  { ticker:"CL",  finnhub:"CL=F",  td:"CL1!",  group:"energies", name:"Crude Oil Futures" },
+  { ticker:"NG",  finnhub:"NG=F",  td:"NG1!",  group:"energies", name:"Natural Gas Futures" },
+  { ticker:"DXY", finnhub:"DX=F",  td:"DX1!",  group:"dxy",      name:"US Dollar Index" },
 ];
 
 async function fetchLivePrices() {
   const results = {};
-  const FMP_KEY = process.env.FMP_API_KEY || "WQMcZiIIJ1rarvN3puluUNQoGXFdvkjg";
-  const FINNHUB_KEY = process.env.FINNHUB_API_KEY || "d8gh1phr01qlgcujfjfgd8gh1phr01qlgcujfjg0";
+  const TD_KEY = process.env.TWELVE_DATA_API_KEY || "559c9af13d024c02bc3dde90163dbf8d";
 
-  // FMP stable batch quote — fetch all symbols in one call
-  // FMP futures symbols use = notation: ES=F, NQ=F etc.
-  async function fetchFMPBatch() {
-    try {
-      const symbols = MARKET_SYMBOLS.map(s => s.finnhub).join(",");
-      const raw = await fetchUrl(
-        "https://financialmodelingprep.com/stable/quote?symbol=" + encodeURIComponent(symbols) + "&apikey=" + FMP_KEY
-      );
-      const json = JSON.parse(raw);
-      if (!Array.isArray(json) || json.length === 0) return null;
-      const map = {};
-      json.forEach(q => {
-        if (q.symbol && q.price) {
-          map[q.symbol] = {
-            price:  parseFloat(q.price),
-            prev:   parseFloat(q.previousClose || q.price),
-            pct:    parseFloat(q.changesPercentage) || 0,
-            change: parseFloat(q.change) || 0,
-            high:   parseFloat(q.dayHigh) || 0,
-            low:    parseFloat(q.dayLow)  || 0,
-          };
-        }
-      });
-      return Object.keys(map).length > 0 ? map : null;
-    } catch(e) {
-      console.log("FMP batch quote error:", e.message);
-      return null;
-    }
+  // Twelve Data batch quote — all 11 symbols in one call
+  // Futures use continuous contract notation: ES1!, NQ1!, GC1! etc.
+  const tdSymbols = MARKET_SYMBOLS.map(s => s.td).join(",");
+  let tdMap = {};
+  try {
+    const raw = await fetchUrl(
+      "https://api.twelvedata.com/quote?symbol=" + encodeURIComponent(tdSymbols) + "&apikey=" + TD_KEY
+    );
+    const json = JSON.parse(raw);
+    // Response is either { SYMBOL: {...} } for multiple or direct object for single
+    const entries = Object.keys(json);
+    entries.forEach(sym => {
+      const q = json[sym];
+      if (q && q.close && !q.code) { // code field = error
+        const price  = parseFloat(q.close);
+        const prev   = parseFloat(q.previous_close || q.close);
+        const change = parseFloat(q.change) || (price - prev);
+        const pct    = parseFloat(q.percent_change) || (prev ? (change/prev)*100 : 0);
+        tdMap[sym] = {
+          price:  price,
+          prev:   prev,
+          change: parseFloat(change.toFixed(2)),
+          pct:    parseFloat(pct.toFixed(2)),
+          high:   parseFloat(q.fifty_two_week ? q.fifty_two_week.high : 0) || parseFloat(q.high||0),
+          low:    parseFloat(q.fifty_two_week ? q.fifty_two_week.low  : 0) || parseFloat(q.low||0),
+        };
+      }
+    });
+    console.log("Market prices: Twelve Data returned", Object.keys(tdMap).length, "symbols");
+  } catch(e) {
+    console.log("Twelve Data error:", e.message);
   }
 
-  // Finnhub individual fallback
-  async function fetchFinnhubOne(symbol) {
-    try {
-      const raw = await fetchUrl(
-        "https://finnhub.io/api/v1/quote?symbol=" + symbol + "&token=" + FINNHUB_KEY
-      );
-      const q = JSON.parse(raw);
-      if (!q || !q.c || q.c === 0) return null;
-      return {
-        price:  parseFloat(q.c),
-        prev:   parseFloat(q.pc),
-        pct:    parseFloat(q.dp) || 0,
-        change: parseFloat(q.d)  || 0,
-        high:   parseFloat(q.h)  || 0,
-        low:    parseFloat(q.l)  || 0,
-      };
-    } catch(e) { return null; }
-  }
-
-  // Try FMP batch first
-  const fmpMap = await fetchFMPBatch();
-  console.log("Market prices: FMP batch returned", fmpMap ? Object.keys(fmpMap).length : 0, "symbols");
-
-  const quotes = await Promise.all(MARKET_SYMBOLS.map(async (s) => {
-    // Use FMP result if available, else try Finnhub individually
-    let q = fmpMap && fmpMap[s.finnhub] ? fmpMap[s.finnhub] : null;
-    if (!q) q = await fetchFinnhubOne(s.finnhub);
+  const quotes = MARKET_SYMBOLS.map(s => {
+    const q = tdMap[s.td];
     if (!q) {
-      console.log("No price data for:", s.ticker, s.finnhub);
+      console.log("No price for:", s.ticker, s.td);
       return { ticker: s.ticker, group: s.group, price: null, pct: null };
     }
     return { ticker: s.ticker, group: s.group, ...q };
-  }));
+  });
 
   // Build results map + relative strength rank within each group
   const groups = {};
