@@ -510,7 +510,7 @@ function callClaude(prompt, data, useWebSearch) {
     const today = new Date().toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
     const body = {
       model: useWebSearch ? "claude-sonnet-4-6" : "claude-haiku-4-5-20251001",
-      max_tokens: 500,
+      max_tokens: useWebSearch ? 1000 : 500,  // web search needs more tokens for search results
       temperature: 0,
       // ── MODIFIED: added "guidance" field to the JSON schema description ──
       system: "You are a futures trader morning briefing assistant. Today is " + today + ". CRITICAL: Reply ONLY with raw JSON, no markdown, no backticks, no explanation. Format: {\"signal\":\"bull\",\"summary\":\"2 sentence summary\",\"score\":1,\"guidance\":null} where signal is bull/bear/neutral, score is 1/-1/0, and guidance is a one-sentence forward guidance note (for earnings topics only) or null if not applicable.",
