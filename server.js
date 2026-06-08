@@ -534,17 +534,29 @@ function callClaude(prompt, data, useWebSearch) {
           const parsed = JSON.parse(raw);
           if (parsed.error) return reject(new Error(parsed.error.message));
           const text = (parsed.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
-          const cleaned = text.replace(/```json|```/g, "").trim();
+          if (!text) {
+            // Web search may return only tool_use blocks with no text — log and return neutral
+            console.log("callClaude: empty text response, stop_reason:", parsed.stop_reason, "content types:", (parsed.content||[]).map(b=>b.type).join(","));
+            return resolve({ signal: "neutral", summary: "Could not fetch data. Use override buttons to set manually.", score: 0, guidance: null });
+          }
+          // Extract JSON — handle cases where Claude wraps it in preamble text
+          let cleaned = text.replace(/```json|```/g, "").trim();
+          // Try to find JSON object if Claude added preamble
+          const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+          if (jsonMatch) cleaned = jsonMatch[0];
           const result = JSON.parse(cleaned);
-          // Ensure result has required fields — if Claude returned an error object, normalize it
+          // Ensure result has required fields
           if (!result.signal || !result.hasOwnProperty("score")) {
+            console.log("callClaude: missing required fields in result:", JSON.stringify(result).slice(0,100));
             resolve({ signal: "neutral", summary: "Could not fetch data. Use override buttons to set manually.", score: 0, guidance: null });
           } else {
-            // ── MODIFIED: ensure guidance key always exists (null if not returned) ──
             if (!result.hasOwnProperty("guidance")) result.guidance = null;
             resolve(result);
           }
-        } catch(e) { reject(new Error("Parse error: " + e.message)); }
+        } catch(e) {
+          console.log("callClaude parse error:", e.message, "| raw snippet:", raw.slice(0,200));
+          reject(new Error("Parse error: " + e.message));
+        }
       });
     });
     req.on("error", reject);
