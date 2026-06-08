@@ -297,6 +297,41 @@ body.backtest-mode .run-btn:hover:not(:disabled) { background: rgba(255,184,0,0.
 }
 .backtest-date-pick input[type=date]::-webkit-calendar-picker-indicator { filter: invert(0.7) sepia(1) hue-rotate(10deg); }
 .backtest-run-note { font-size: 10px; color: var(--muted); letter-spacing: 0.06em; }
+
+/* live prices + relative strength */
+.market-price-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 5px 12px; border-bottom: 1px solid var(--border);
+  background: rgba(0,0,0,0.15);
+}
+.market-price { font-family: var(--font-display); font-size: 16px; letter-spacing: 1px; color: var(--text); }
+.market-change {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.05em;
+  padding: 2px 7px; border-radius: 2px;
+}
+.market-change.up   { color: var(--bull); background: rgba(0,255,148,0.1); }
+.market-change.down { color: var(--bear); background: rgba(255,68,68,0.1); }
+.market-change.flat { color: var(--muted); background: rgba(74,96,70,0.1); }
+.market-hl { font-size: 9px; color: var(--muted); letter-spacing: 0.04em; }
+
+.strength-badge {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 2px; white-space: nowrap;
+}
+.strength-badge.strongest { background: rgba(0,255,148,0.15); color: var(--bull); border: 1px solid rgba(0,255,148,0.3); }
+.strength-badge.weakest   { background: rgba(255,68,68,0.15); color: var(--bear); border: 1px solid rgba(255,68,68,0.3); }
+.strength-badge.rank      { background: rgba(74,96,70,0.15); color: var(--muted); border: 1px solid var(--border2); }
+
+.market-card-hdr-sub {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.prices-loading { font-size: 10px; color: var(--muted); font-style: italic; padding: 4px 12px; }
+.prices-refresh-btn {
+  font-size: 9px; padding: 2px 8px; border: 1px solid var(--border2);
+  background: transparent; color: var(--muted); cursor: pointer;
+  font-family: var(--font-mono); border-radius: 2px; transition: all 0.15s;
+}
+.prices-refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
 </style>
 </head>
 <body>
@@ -445,7 +480,10 @@ body.backtest-mode .run-btn:hover:not(:disabled) { background: rgba(255,184,0,0.
 
   <!-- MARKETS TAB -->
   <div id="panelMarkets" style="display:none;">
-    <button class="markets-refresh-btn" id="marketsRefreshBtn" onclick="loadMarkets()">&#9654; GENERATE MARKET IMPLICATIONS</button>
+    <div style="display:flex;gap:8px;margin-bottom:0.75rem;">
+      <button class="markets-refresh-btn" id="marketsRefreshBtn" onclick="loadMarkets()" style="flex:1;">&#9654; GENERATE MARKET IMPLICATIONS</button>
+      <button class="prices-refresh-btn" id="pricesRefreshBtn" onclick="refreshLivePrices()" title="Refresh live prices" style="padding:8px 14px;font-size:10px;">&#8635; PRICES</button>
+    </div>
     <div id="marketsContent">
       <div class="markets-empty">Run analysis first, then generate market implications.</div>
     </div>
@@ -555,6 +593,8 @@ function switchToMarkets(){
   document.getElementById('btnToday').classList.remove('active');
   document.getElementById('btnHist').classList.remove('active');
   document.getElementById('btnMarkets').classList.add('active');
+  // Auto-refresh live prices when opening markets tab
+  setTimeout(refreshLivePrices, 100);
   document.getElementById('datePicker').style.display='none';
   document.getElementById('modeBadge').textContent='MARKETS';
   document.getElementById('modeBadge').className='mode-badge mode-hist';
@@ -1140,6 +1180,8 @@ async function loadMarketsBackground() {
 
   }
 
+  // Fetch live prices and re-render market cards with price data
+  refreshLivePrices();
   // Auto-generate summary regardless of markets success/failure
   loadSummaryBackground();
 }
@@ -1175,6 +1217,8 @@ var MARKET_NAMES = {
   CL:'Crude Oil Futures', NG:'Natural Gas Futures', DXY:'US Dollar Index'
 };
 
+var livePrices = {}; // populated by refreshLivePrices()
+
 function renderMarketCard(ticker, data) {
   var bias = data.bias || 'neutral';
   var isBest = data.bestSetup === true;
@@ -1199,15 +1243,69 @@ function renderMarketCard(ticker, data) {
     '</div>';
   }
 
+  // Live price row
+  var priceRow = '';
+  var p = livePrices[ticker];
+  if (p && p.price) {
+    var pct = parseFloat(p.pct) || 0;
+    var pctStr = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+    var chgClass = pct > 0.05 ? 'up' : pct < -0.05 ? 'down' : 'flat';
+    var chgStr = (p.change >= 0 ? '+' : '') + (p.change||0).toFixed(2);
+
+    // Strength badge
+    var strengthBadge = '';
+    if (p.groupSize > 1) {
+      if (p.isStrongest) strengthBadge = '<span class="strength-badge strongest">#1 STRONGEST</span>';
+      else if (p.isWeakest) strengthBadge = '<span class="strength-badge weakest">#'+p.rank+' WEAKEST</span>';
+      else strengthBadge = '<span class="strength-badge rank">#'+p.rank+' of '+p.groupSize+'</span>';
+    }
+
+    var hlStr = p.high && p.low ? 'H: '+p.high.toFixed(2)+' L: '+p.low.toFixed(2) : '';
+
+    priceRow = '<div class="market-price-row">' +
+      '<div>' +
+        '<div class="market-price">'+p.price.toFixed(2)+'</div>' +
+        '<div class="market-hl">'+hlStr+'</div>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:6px;">' +
+        strengthBadge +
+        '<span class="market-change '+chgClass+'">'+pctStr+' ('+chgStr+')</span>' +
+      '</div>' +
+    '</div>';
+  }
+
   return '<div class="market-card '+borderClass+'">' +
     bestBanner +
     '<div class="market-card-hdr">' +
       '<div><div class="market-ticker '+bias+'">'+ticker+'</div><div class="market-name">'+(MARKET_NAMES[ticker]||'')+'</div></div>' +
-      '<div style="display:flex;align-items:center;gap:6px;">'+divergeBadge+'<span class="market-sig '+sigClass+'">'+sigLabel+'</span></div>' +
+      '<div class="market-card-hdr-sub">'+divergeBadge+'<span class="market-sig '+sigClass+'">'+sigLabel+'</span></div>' +
     '</div>' +
+    priceRow +
     '<div class="market-body">'+(data.implication||'No data.')+'</div>' +
     '<div class="market-footer">'+keyLevel+'</div>' +
   '</div>';
+}
+
+async function refreshLivePrices() {
+  var btn = document.getElementById('pricesRefreshBtn');
+  if (btn) btn.textContent = '↻';
+  try {
+    var res = await fetch(BASE + '/api/market-prices');
+    var data = await res.json();
+    if (data.prices) {
+      livePrices = data.prices;
+      // Re-render markets if we have data
+      if (lastMarketResults) {
+        var mHtml = '';
+        mHtml += renderMarketsSection('EQUITIES',    {ES:1,NQ:1,YM:1,RTY:1}, lastMarketResults.equities);
+        mHtml += renderMarketsSection('METALS',      {GC:1,SI:1,HG:1,PL:1},  lastMarketResults.metals);
+        mHtml += renderMarketsSection('ENERGIES',    {CL:1,NG:1},             lastMarketResults.energies);
+        mHtml += renderMarketsSection('DOLLAR INDEX',{DXY:1},                 lastMarketResults.dxy);
+        document.getElementById('marketsContent').innerHTML = mHtml;
+      }
+    }
+  } catch(e) { console.error('Live prices error:', e); }
+  if (btn) btn.textContent = '↺ Prices';
 }
 
 function renderMarketsSection(title, instruments, data) {
