@@ -1033,6 +1033,19 @@ app.post("/api/meta-score", async function(req, res) {
     // ── Server-side deterministic scoring — never trust Claude's math ──
     const weights = result.weights || { econ: 3, earn: 2, premarket: 1, news: 2 };
 
+    // Hard cap pre-market weight based on time of day
+    // After US open (9:30am ET), pre-market is stale — cap at 2
+    // After mid-session (12pm ET), cap at 1
+    const etNowMeta = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
+    const etHourMeta = etNowMeta.getHours();
+    const etMinMeta  = etNowMeta.getMinutes();
+    const etDayMeta  = etNowMeta.getDay();
+    const isWeekday  = etDayMeta >= 1 && etDayMeta <= 5;
+    const afterOpen  = isWeekday && (etHourMeta > 9 || (etHourMeta === 9 && etMinMeta >= 30));
+    const afterNoon  = isWeekday && etHourMeta >= 12;
+    if (afterNoon  && weights.premarket > 1) { weights.premarket = 1; console.log("Meta: pre-market weight capped at 1 (after noon ET)"); }
+    else if (afterOpen && weights.premarket > 2) { weights.premarket = 2; console.log("Meta: pre-market weight capped at 2 (after open ET)"); }
+
     // Get scores from request body
     const cardScores = {
       econ:      econ      ? (parseFloat(econ.score)      || 0) : 0,
