@@ -980,7 +980,7 @@ const MARKETS_PROMPT = [
   "You are a senior futures trader. Based on the morning brief signals below, write ONE specific implication sentence and ONE key level for each instrument.",
   "INSTRUMENTS: ES, NQ, YM, RTY (equities), GC, SI, HG, PL (metals), CL, NG (energies), DXY.",
   "FOR EACH INSTRUMENT provide ONLY:",
-  "1. implication: ONE sentence on what today's specific drivers mean for this instrument. Name the actual catalyst (e.g. yield spike, risk-off, dollar strength, Asia weakness). Be precise, not generic.",
+  "1. implication: ONE sentence on what today's specific drivers mean for this instrument. Name the actual catalyst (e.g. oil supply shock from Middle East war, geopolitical escalation, yield spike, dollar strength, Asia weakness). CRITICAL: Your sentence MUST reflect the instrument's actual price direction — if crude oil is rising due to a supply shock, say it is under upward pressure. If gold has a safe-haven bid competing with dollar strength, explain the tension. Be directionally accurate and specific.",
   "2. keyLevel: the single most important price level or zone to watch today, as a string (e.g. '5250' or '19200-19400'). Null if genuinely unknown.",
   "DO NOT include bias, signal, bestSetup, setupDirection, or divergence — the server calculates these.",
   "RETURN a JSON object with this exact structure:",
@@ -1003,6 +1003,34 @@ function scoreInstruments(econ, earn, premarket, news, metaScore, regime) {
   const preScore   = premarket ? parseFloat(premarket.score) || 0 : 0;
   const earnScore  = earn      ? parseFloat(earn.score)      || 0 : 0;
   const overallWS  = metaScore ? parseFloat(metaScore.weightedScore) || 0 : 0;
+
+  // ── News text analysis — detect commodity/geopolitical specific catalysts ──
+  // These override macro signal rules for commodity instruments
+  const newsText = ((news ? news.summary : "") + " " + (news ? news.guidance||"" : "")).toLowerCase();
+  const econText = ((econ ? econ.summary : "")).toLowerCase();
+  const allText  = newsText + " " + econText;
+
+  // Oil-specific catalysts (supply shock = bull for CL regardless of macro)
+  const oilSupplyShock = /middle east|iran|israel|opec cut|supply shock|pipeline|strait of hormuz|houthi|saudi|oil supply|crude supply|production cut/.test(allText);
+  const oilDemandDestruction = /recession|demand destruction|demand collapse|global slowdown/.test(allText);
+
+  // Gold-specific catalysts
+  const geopoliticalCrisis = /war|military|attack|invasion|missile|escalat|crisis|conflict|iran|russia|north korea|terror/.test(allText);
+  const inflationFears = /inflation|cpi|pce|price pressure|inflationary/.test(allText);
+  const fedPivot = /fed cut|rate cut|pivot|dovish|easing|accommodative/.test(allText);
+
+  // Copper/industrial metals catalysts
+  const chinaStimulus = /china stimulus|pboc|china growth|chinese demand|infrastructure spend/.test(allText);
+  const globalGrowthPositive = /global growth|manufacturing boom|industrial demand|trade expansion/.test(allText);
+
+  // Silver catalysts (solar, EV, industrial)
+  const industrialDemandPositive = (chinaStimulus || globalGrowthPositive);
+  const industrialDemandNegative = oilDemandDestruction || /manufacturing contraction|industrial slowdown/.test(allText);
+
+  // Natural gas catalysts
+  const ngCatalyst = /natural gas|lng|gas storage|heating demand|cooling demand|gas supply|gas pipeline/.test(allText);
+  const ngBull = ngCatalyst && /shortage|cold|heat wave|demand surge|export|cut/.test(allText);
+  const ngBear = ngCatalyst && /glut|mild|warm|oversupply|storage build/.test(allText);
 
   // ── RAW econ direction — independent of regime flip ──
   // Use the passed-in regime object (not module-level cache) to determine
@@ -1061,69 +1089,87 @@ function scoreInstruments(econ, earn, premarket, news, metaScore, regime) {
   const equityBias = { ES: sig(esScore), NQ: sig(nqScore), YM: sig(ymScore), RTY: sig(rtyScore) };
 
   // ── METALS ──
-  // GC rules (in priority order):
-  // 1. Strong dollar + rising yields + risk-off = BEAR (yields & dollar dominate safe-haven bid)
-  // 2. Strong dollar + rising yields (no risk-off) = BEAR
-  // 3. Strong dollar + risk-off (no yields rising) = NEUTRAL (competing forces, no clear winner)
-  // 4. Risk-off alone (dollar neutral/weak) = BULL (safe-haven bid)
-  // 5. Dollar weak or yields falling = BULL
-  // 6. Risk-on + strong dollar + yields rising = BEAR
-  // 7. Default = NEUTRAL
+  // GC: geopolitical crisis is a BULLISH override — safe-haven demand overrides
+  // dollar headwind when there is active military conflict or crisis
   let gcBias;
-  if (dollarStrong && yieldsRising)         gcBias = "bear";   // yields + dollar both headwinds — wins vs safe-haven
-  else if (dollarStrong && riskOff)         gcBias = "neutral"; // competing forces cancel
-  else if (riskOff && !dollarStrong)        gcBias = "bull";    // safe-haven bid with no dollar headwind
-  else if (dollarWeak || yieldsFalling)     gcBias = "bull";    // dollar/yield tailwind
-  else if (riskOn && dollarStrong)          gcBias = "bear";    // risk-on removes safe-haven, dollar adds pressure
-  else                                      gcBias = "neutral";
+  if (geopoliticalCrisis && riskOff && !dollarStrong)  gcBias = "bull";    // crisis + no dollar headwind = strong safe-haven bid
+  else if (geopoliticalCrisis && dollarStrong && yieldsRising) gcBias = "neutral"; // crisis bids gold but dollar/yields cap it
+  else if (geopoliticalCrisis && dollarStrong)          gcBias = "neutral"; // competing forces with crisis premium
+  else if (inflationFears && !dollarStrong)             gcBias = "bull";    // inflation hedge with no dollar headwind
+  else if (fedPivot)                                    gcBias = "bull";    // dovish Fed = gold bull
+  else if (dollarStrong && yieldsRising)                gcBias = "bear";    // yields + dollar dominate — no crisis
+  else if (dollarStrong && riskOff)                     gcBias = "neutral"; // competing forces cancel
+  else if (riskOff && !dollarStrong)                    gcBias = "bull";    // safe-haven bid with no dollar headwind
+  else if (dollarWeak || yieldsFalling)                 gcBias = "bull";    // dollar/yield tailwind
+  else if (riskOn && dollarStrong)                      gcBias = "bear";    // risk-on + strong dollar
+  else                                                  gcBias = "neutral";
 
-  // SI: follows GC direction but more volatile
-  // Industrial demand component means growth fears push it further bear than GC
+  // SI: follows GC but amplified by industrial demand
+  // Geopolitical crisis adds safe-haven bid like gold but industrial component pulls it back
   let siBias;
-  if (gcBias === "bear")                          siBias = "bear";
-  else if (gcBias === "bull" && !growthFears)     siBias = "bull";
-  else if (gcBias === "bull" && growthFears)      siBias = "neutral"; // safe-haven bid offset by industrial demand loss
-  else if (gcBias === "neutral" && growthFears)   siBias = "bear";    // tips bear on industrial weakness
-  else                                            siBias = "neutral";
+  if (gcBias === "bear")                                                siBias = "bear";
+  else if (gcBias === "bull" && industrialDemandPositive)               siBias = "bull";   // gold bull + industrial demand = strong bull
+  else if (gcBias === "bull" && !growthFears && !industrialDemandNegative) siBias = "bull";
+  else if (gcBias === "bull" && (growthFears || industrialDemandNegative)) siBias = "neutral"; // safe-haven bid offset by industrial weakness
+  else if (gcBias === "neutral" && (growthFears || industrialDemandNegative)) siBias = "bear";
+  else if (gcBias === "neutral" && industrialDemandPositive)            siBias = "bull";
+  else                                                                  siBias = "neutral";
 
-  // HG: purely industrial/growth — growth fears or Asia weakness = bear
+  // HG: industrial/growth driven — China stimulus or global growth = bull
+  // Geopolitical risk is indirect for copper (demand matters more than supply)
   let hgBias;
-  if (growthFears || asiaWeak)   hgBias = "bear";
-  else if (riskOn && asiaStrong) hgBias = "bull";
-  else                           hgBias = "neutral";
+  if (chinaStimulus || globalGrowthPositive)   hgBias = "bull";    // direct demand catalyst
+  else if (growthFears || asiaWeak)            hgBias = "bear";    // demand destruction
+  else if (riskOn && asiaStrong)               hgBias = "bull";
+  else                                         hgBias = "neutral";
 
-  // PL: 60% precious metals complex (GC direction), 40% industrial (HG direction)
+  // PL: 50% precious metals (GC direction), 50% industrial (HG direction)
+  // More industrial-sensitive than gold — automotive/industrial demand matters more for platinum
+  // Geopolitical crisis gives less safe-haven bid than gold
   const plMetals = gcBias === "bull" ? 1 : gcBias === "bear" ? -1 : 0;
   const plIndust = hgBias === "bull" ? 1 : hgBias === "bear" ? -1 : 0;
-  const plScore  = (plMetals * 0.6) + (plIndust * 0.4);
+  // Geopolitical crisis: reduce precious metal component for PL (less safe-haven than GC)
+  const plGeoAdj = (geopoliticalCrisis && gcBias === "bull") ? -0.2 : 0; // crisis inflates GC but not PL as much
+  const plScore  = (plMetals * 0.5) + (plIndust * 0.5) + plGeoAdj;
   const plBias   = sig(plScore);
 
   // ── ENERGIES ──
-  // CL: growth fears / dollar strength = bear; risk-on / dollar weak = bull
+  // CL: supply shock from geopolitical events OVERRIDES macro bearish signal
+  // Middle East war / OPEC cuts = bull even in risk-off / strong dollar environment
+  // Only genuine demand destruction (recession) beats the supply shock
   let clBias;
-  if (growthFears)                  clBias = "bear";  // demand destruction fears dominate
-  else if (riskOff && dollarStrong) clBias = "bear";
-  else if (riskOn  && dollarWeak)   clBias = "bull";
-  else if (dollarStrong)            clBias = "bear";
-  else if (riskOff)                 clBias = "bear";
-  else                              clBias = "neutral";
+  if (oilSupplyShock && !oilDemandDestruction)         clBias = "bull";    // supply shock dominates — geopolitical premium
+  else if (oilSupplyShock && oilDemandDestruction)     clBias = "neutral"; // supply shock vs demand destruction = mixed
+  else if (oilDemandDestruction || growthFears)        clBias = "bear";    // demand destruction wins when no supply shock
+  else if (riskOn && dollarWeak)                       clBias = "bull";    // risk-on + weak dollar
+  else if (riskOff && dollarStrong && !oilSupplyShock) clBias = "bear";    // macro bearish, no oil-specific catalyst
+  else if (dollarStrong && !oilSupplyShock)            clBias = "bear";
+  else if (riskOff && !oilSupplyShock)                 clBias = "bear";
+  else                                                 clBias = "neutral";
 
-  // NG: macro-independent, always neutral (weather/storage driven)
-  const ngBias = "neutral";
+  // NG: weather/storage driven — macro-independent unless specific NG catalyst detected
+  let ngBias;
+  if (ngBull)       ngBias = "bull";   // specific NG supply/demand catalyst
+  else if (ngBear)  ngBias = "bear";   // specific NG oversupply/mild weather
+  else              ngBias = "neutral"; // no NG-specific catalyst — default neutral
 
   // ── DXY ──
   // Based on RAW data strength + regime — not regime-adjusted econ signal
   // Strong data = dollar bull (rate premium). Weak data = dollar bear.
-  // Risk-off adds to dollar strength (flight to safety) but doesn't override data.
+  // Geopolitical crisis + risk-off = dollar bull (flight to safety)
+  // But oil supply shock alone (without rate/data driver) = neutral for dollar
+  //   because oil inflation can both hurt and help dollar depending on context
   let dxyBias;
-  if      (econDataStrong && riskOff)                              dxyBias = "bull";    // strong data + safety bid = dollar bid on all fronts
-  else if (econDataStrong)                                         dxyBias = "bull";    // strong data alone = rate premium drives dollar
-  else if (econIsNeutral && newsSig === "bear" && preSig === "bear") dxyBias = "bull";  // no new data but prior strong data still echoing through yields/risk-off
-  else if (econDataWeak   && riskOn)                               dxyBias = "bear";   // weak data + risk-on = dollar sold
-  else if (econDataWeak)                                           dxyBias = "bear";   // weak data = rate cut expectations = dollar weak
-  else if (econIsNeutral  && newsSig === "bull" && preSig === "bull") dxyBias = "bear"; // no data, risk-on = dollar pressure
-  else if (riskOff)                                                dxyBias = "neutral"; // safety bid but no data direction = no conviction
-  else                                                             dxyBias = "neutral";
+  if      (econDataStrong && riskOff)                                  dxyBias = "bull";     // strong data + safety bid
+  else if (econDataStrong)                                             dxyBias = "bull";     // rate premium drives dollar
+  else if (geopoliticalCrisis && riskOff && !econDataWeak)             dxyBias = "bull";     // flight to safety into USD during crisis
+  else if (econIsNeutral && newsSig === "bear" && preSig === "bear")   dxyBias = "bull";     // prior strong data echo
+  else if (econDataWeak && riskOn)                                     dxyBias = "bear";     // weak data + risk-on = dollar sold
+  else if (econDataWeak)                                               dxyBias = "bear";     // rate cut expectations
+  else if (econIsNeutral && newsSig === "bull" && preSig === "bull")   dxyBias = "bear";     // risk-on, no data support
+  else if (oilSupplyShock && !econDataStrong && !geopoliticalCrisis)   dxyBias = "neutral";  // oil shock without macro driver = mixed dollar signal
+  else if (riskOff)                                                    dxyBias = "neutral";  // safety bid but no clear direction
+  else                                                                 dxyBias = "neutral";
 
   // ── BEST SETUP per group ──
   // Pick clearest directional (not neutral) + aligns with overall bias signal
