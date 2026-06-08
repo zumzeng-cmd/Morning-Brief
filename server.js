@@ -966,7 +966,7 @@ const META_PROMPT = [
   "Weight 2 = Low impact (background noise, already priced in, conflicting signals).",
   "Weight 1 = Negligible (stale data, no confirmed actuals, neutral/mixed with no clear direction).",
   "DYNAMIC RULES: On NFP/CPI/FOMC days, econ starts at weight 5 and pre-market gets weight 1 (pre-market just reflects the same data). On mega-cap earnings days with no macro, earnings gets 5. News max weight is 4 (never 5 unless MARKET_SHOCK_OVERRIDE).",
-  "PRE-MARKET WEIGHT RULES: Pre-market is a SUPPORTING indicator only — it confirms or contradicts other signals. HARD CAP: pre-market max weight is 3, even on days with no macro data. If today is past 9:30am ET and US markets are open, pre-market weight should be 1-2 (it is now stale — US session price action supersedes overnight data). Pre-market weight 3 is only appropriate pre-open when it is the sole directional signal.",
+  "PRE-MARKET WEIGHT RULES: Pre-market is a SUPPORTING indicator only — it confirms or contradicts other signals but cannot set the day's direction on its own. HARD CAP: pre-market max weight is 3 pre-open. Once US markets open (9:30am ET), pre-market weight is capped at 1 — the overnight data is stale and the US session supersedes it. CRITICAL: If pre-market is the ONLY card with a directional signal after open (econ/earnings/news all neutral), still assign it weight 1 only — a single overnight data point is not sufficient conviction to call the day bullish or bearish.",
   "MARKET REACTION RULE (CRITICAL): The market's actual price reaction always takes precedence over the raw data beat or miss. If econ is bullish (data beat) BUT news is bearish (market is selling the news — e.g. yields spiking, equities falling), this means the market is REJECTING the bullish interpretation. In this case: REDUCE econ weight by 2 (min 2) and INCREASE news weight by 2 (max 4). The news card captures real-time price action; when it contradicts econ, it wins. Example: NFP beats big (econ=bull) but 10yr yield spikes above 4.5% and NQ sells off (news=bear) = econ weight drops from 5 to 3, news weight rises from 2 to 4.",
   "CONTRADICTION RULE: If pre-market and news both contradict econ, treat that as strong confirmation that the market is not trading the data bullishly. In this scenario econ weight max is 3.",
   "RATIONALE: One sentence explaining what is driving the market today, whether the market is trading the data or rejecting it, and why you weighted things the way you did.",
@@ -1034,17 +1034,28 @@ app.post("/api/meta-score", async function(req, res) {
     const weights = result.weights || { econ: 3, earn: 2, premarket: 1, news: 2 };
 
     // Hard cap pre-market weight based on time of day
-    // After US open (9:30am ET), pre-market is stale — cap at 2
-    // After mid-session (12pm ET), cap at 1
+    // After US open (9:30am ET), pre-market is stale — hard cap at 1
+    // Pre-market alone cannot set the day's sentiment once US session is live
     const etNowMeta = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
     const etHourMeta = etNowMeta.getHours();
     const etMinMeta  = etNowMeta.getMinutes();
     const etDayMeta  = etNowMeta.getDay();
     const isWeekday  = etDayMeta >= 1 && etDayMeta <= 5;
     const afterOpen  = isWeekday && (etHourMeta > 9 || (etHourMeta === 9 && etMinMeta >= 30));
-    const afterNoon  = isWeekday && etHourMeta >= 12;
-    if (afterNoon  && weights.premarket > 1) { weights.premarket = 1; console.log("Meta: pre-market weight capped at 1 (after noon ET)"); }
-    else if (afterOpen && weights.premarket > 2) { weights.premarket = 2; console.log("Meta: pre-market weight capped at 2 (after open ET)"); }
+    if (afterOpen && weights.premarket > 1) {
+      weights.premarket = 1;
+      console.log("Meta: pre-market weight capped at 1 (US session open)");
+    }
+
+    // SOLO PRE-MARKET RULE: After open, pre-market alone cannot drive bullish/bearish bias.
+    // If econ + earn + news are all neutral (0) and only pre-market has a signal,
+    // force pre-market weight to 1 regardless of time — it takes two signals to set direction.
+    const otherScoresAllNeutral = afterOpen &&
+      (cardScores.econ === 0) && (cardScores.earn === 0) && (cardScores.news === 0);
+    if (otherScoresAllNeutral && cardScores.premarket !== 0) {
+      weights.premarket = 1;
+      console.log("Meta: pre-market weight held at 1 — sole signal after open cannot set bias alone");
+    }
 
     // Get scores from request body
     const cardScores = {
