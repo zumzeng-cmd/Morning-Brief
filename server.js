@@ -209,6 +209,38 @@ async function fetchEarnings() {
 async function fetchPremarket() {
   const FINNHUB_KEY = process.env.FINNHUB_API_KEY || "d8gh1phr01qlgcujfjfgd8gh1phr01qlgcujfjg0";
 
+  // Weekend/overnight session detection
+  const now = new Date();
+  const etNow = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+  const dayOfWeek = etNow.getDay(); // 0=Sun, 6=Sat
+  const hourET = etNow.getHours();
+
+  // Saturday all day — fully closed, return neutral immediately
+  if (dayOfWeek === 6) {
+    console.log("Premarket: Saturday — markets fully closed");
+    return "WEEKEND SATURDAY — All markets closed. No pre-market data available. Score neutral (0).";
+  }
+
+  // Sunday before 5pm ET — still closed, return neutral
+  if (dayOfWeek === 0 && hourET < 17) {
+    console.log("Premarket: Sunday before 5pm ET — markets still closed");
+    return "WEEKEND SUNDAY (pre-open) — Markets remain closed. Asian session has not yet opened. Score neutral (0).";
+  }
+
+  // Sunday 5pm ET or later — Asia is opening/open, fall through to web search
+  // (Finnhub ETF proxies won't have data yet — use web search for live Asian market context)
+  if (dayOfWeek === 0 && hourET >= 17) {
+    console.log("Premarket: Sunday evening — Asia opening, will use web search for live context");
+    return null; // null triggers web search fallback in the analyze endpoint
+  }
+
+  // Monday before 3am ET — Asia trading, Europe not yet open
+  // Finnhub ETFs still won't be live — use web search
+  if (dayOfWeek === 1 && hourET < 3) {
+    console.log("Premarket: Monday pre-Europe — Asia trading, using web search");
+    return null; // null triggers web search fallback
+  }
+
   // ETF proxies for international indices (free tier compatible)
   const symbols = [
     // Asia ETF proxies
@@ -705,16 +737,35 @@ app.post("/api/analyze", async function(req, res) {
         console.log("Premarket: using Make.com data");
       } else {
         rawData = await fetchPremarket();
-        if (rawData) {
+        const today2 = new Date();
+        const todayStr2 = today2.toISOString().slice(0, 10);
+        const etNow2 = new Date(today2.toLocaleString("en-US", { timeZone: "America/New_York" }));
+        const dayET = etNow2.getDay();
+        const hourET2 = etNow2.getHours();
+
+        if (rawData && !rawData.startsWith("WEEKEND") && rawData.includes("ASIA")) {
+          // Good Finnhub ETF data
           console.log("Premarket: using Finnhub ETF data");
+        } else if (rawData && rawData.startsWith("WEEKEND SATURDAY")) {
+          // Saturday — score neutral, no search needed
+          console.log("Premarket: Saturday closed");
+        } else if (rawData && rawData.startsWith("WEEKEND SUNDAY (pre-open)")) {
+          // Sunday before 5pm — neutral
+          console.log("Premarket: Sunday pre-open closed");
         } else {
-          // Finnhub failed — fall back to web search
-          const today2 = new Date();
-          const todayStr2 = today2.toISOString().slice(0, 10);
+          // null (Sunday evening / Monday pre-Europe) OR Finnhub failed — web search
           rawData = "NO EXTERNAL DATA";
-          prompt = PREMARKET_PROMPT + " Search the web for today " + todayStr2 + " pre-market performance of: HSI (Hang Seng), Nikkei 225, ASX 200, Shanghai Composite, STI. Also STOXX 600, DAX, FTSE 100, AEX, CAC 40. Also NQ futures, ES futures, DOW futures. State % change for each.";
+          let searchCtx = "";
+          if (dayET === 0 && hourET2 >= 17) {
+            searchCtx = " It is Sunday evening ET — Asian markets are opening or in early session. Search for LIVE current performance of: HSI (Hang Seng), Nikkei 225, ASX 200 (Australia), Shanghai Composite, STI (Singapore). State current % change for each. Also check if US index futures (NQ, ES) are showing any direction in overnight trading.";
+          } else if (dayET === 1 && hourET2 < 3) {
+            searchCtx = " It is early Monday morning ET — Asian markets are trading, European markets have not opened yet. Search for LIVE current performance of: HSI, Nikkei, ASX 200, Shanghai, STI. State current % change for each. Note European markets open at approximately 3am ET.";
+          } else {
+            searchCtx = " Search the web for today " + todayStr2 + " pre-market performance of: HSI (Hang Seng), Nikkei 225, ASX 200, Shanghai Composite, STI. Also STOXX 600, DAX, FTSE 100, AEX, CAC 40. Also NQ futures, ES futures, DOW futures. State % change for each.";
+          }
+          prompt = PREMARKET_PROMPT + searchCtx;
           useSearch = true;
-          console.log("Premarket: using web search fallback");
+          console.log("Premarket: using web search —", dayET === 0 ? "Sunday evening" : dayET === 1 && hourET2 < 3 ? "Monday pre-Europe" : "Finnhub fallback");
         }
       }
     } else if (topic === "news") {
