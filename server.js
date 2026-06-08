@@ -782,8 +782,35 @@ app.post("/api/analyze", async function(req, res) {
       }
     } else if (topic === "news") {
       prompt = NEWS_PROMPT;
-      rawData = latestMakeData.news || await fetchNews();
-      if (latestMakeData.news) console.log("News: using Make.com data");
+      if (latestMakeData.news && latestMakeData.news.length > 50) {
+        rawData = latestMakeData.news;
+        console.log("News: using Make.com data");
+      } else {
+        // Weekend detection — CNBC scrape shows stale Friday content on weekends
+        const nowNews = new Date();
+        const etNowNews = new Date(nowNews.toLocaleString("en-US", { timeZone: "America/New_York" }));
+        const dayNews = etNowNews.getDay(); // 0=Sun, 6=Sat
+        const hourNews = etNowNews.getHours();
+        const isWeekend = dayNews === 6 || (dayNews === 0);
+        const isSundayEvening = dayNews === 0 && hourNews >= 17;
+
+        if (isWeekend && !isSundayEvening) {
+          // Saturday or Sunday daytime — use scrape but note it may be stale
+          rawData = await fetchNews();
+          console.log("News: weekend — using CNBC scrape (may show Friday data)");
+        } else if (isSundayEvening) {
+          // Sunday evening — web search for weekend developments + Asia open context
+          rawData = "NO EXTERNAL DATA";
+          const todayStrNews = nowNews.toISOString().slice(0, 10);
+          prompt = NEWS_PROMPT + " It is Sunday evening ET. Search the web for: (1) any major market-moving news that broke this weekend (geopolitical events, Fed commentary, economic surprises, corporate news), (2) the tone of Asian markets as they open tonight, (3) any developments since Friday's US close that could move NQ/ES on Monday open. If nothing significant happened, note that markets closed Friday's session with [summarize Friday's dominant narrative] and no major weekend catalysts have emerged.";
+          useSearch = true;
+          console.log("News: Sunday evening — using web search for weekend developments");
+        } else {
+          // Normal weekday — use CNBC scrape
+          rawData = await fetchNews();
+          console.log("News: using CNBC scrape");
+        }
+      }
     } else {
       return res.status(400).json({ error: "Unknown topic" });
     }
@@ -1241,17 +1268,18 @@ app.post("/api/markets", async function(req, res) {
 const SUMMARY_PROMPT = [
   "You are explaining today's financial market conditions to someone who is intelligent but not a trader.",
   "They want to understand what is happening in markets today, why it matters, and what it means — in plain English with no jargon.",
-  "You have been given the full morning brief: the market regime, overall bias, four signal cards (econ, earnings, premarket, news), and market implications for specific instruments.",
-  "Write a clear, conversational summary in 4 short paragraphs:",
-  "PARAGRAPH 1 — THE BIG PICTURE: What is the overall mood in markets today and what is the single most important thing driving it? Use an analogy or plain language. No ticker symbols in this paragraph.",
-  "PARAGRAPH 2 — WHY IT MATTERS: Explain the key cause-and-effect chain. E.g. 'A stronger-than-expected jobs report means the Fed is less likely to cut interest rates soon, which makes borrowing more expensive, which weighs on growth stocks.' Connect the dots for a non-trader.",
-  "PARAGRAPH 3 — WHAT THE MARKETS ARE DOING: Briefly describe what equities, metals, and the dollar are doing today and why — in plain English. You can mention asset names (stocks, gold, dollar, oil) but avoid futures codes like NQ or ES.",
-  "PARAGRAPH 4 — WHAT TO WATCH: One or two things that could change the picture today or this week. Keep it simple and forward-looking.",
+  "You have been given the full morning brief: the market regime, overall bias, all four signal cards with their individual sentiments, and market implications for specific instruments.",
+  "Write a clear, conversational summary in 5 short paragraphs:",
+  "PARAGRAPH 1 — THE BIG PICTURE: What is the overall mood in markets today and what is the single most important thing driving it? State the overall bias clearly (e.g. bearish, neutral, bullish) and the primary reason. Use plain language. No ticker symbols in this paragraph.",
+  "PARAGRAPH 2 — THE FOUR SIGNALS: Briefly explain what each of the four cards is saying in plain English — (1) what economic data released today means, (2) what earnings are telling us, (3) what overnight global markets (Asia and Europe) did and why, (4) what the key news narrative is. Each signal gets 1 sentence. Connect them to the overall picture.",
+  "PARAGRAPH 3 — WHY IT MATTERS: Explain the key cause-and-effect chain for a non-trader. E.g. 'A stronger-than-expected jobs report means the Fed is less likely to cut interest rates soon, which makes borrowing more expensive, which weighs on growth stocks.' Connect the dots clearly.",
+  "PARAGRAPH 4 — WHAT THE MARKETS ARE DOING: Briefly describe what stocks, gold, oil, and the dollar are doing today and why — in plain English. Mention the directional bias for each asset class. Avoid futures codes.",
+  "PARAGRAPH 5 — WHAT TO WATCH: One or two specific things that could change the picture today or this week. Keep it forward-looking and actionable for a non-trader.",
   "TONE: Conversational, clear, confident. Like a smart friend explaining the news over coffee — not a Bloomberg terminal.",
-  "LENGTH: 4 paragraphs, 3-5 sentences each. No headers, no bullet points, no bold text. Just clean readable prose.",
+  "LENGTH: 5 paragraphs, 2-4 sentences each. No headers, no bullet points, no bold text. Just clean readable prose.",
   "JSON SCHEMA: {",
   "  \"headline\": \"8-10 word headline summarising today in plain English\",",
-  "  \"paragraphs\": [\"paragraph 1\", \"paragraph 2\", \"paragraph 3\", \"paragraph 4\"]",
+  "  \"paragraphs\": [\"paragraph 1\", \"paragraph 2\", \"paragraph 3\", \"paragraph 4\", \"paragraph 5\"]",
   "}"
 ].join(" ");
 
@@ -1263,27 +1291,28 @@ app.post("/api/summary", async function(req, res) {
     const today = new Date().toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
     const etTime = new Date().toLocaleTimeString("en-US", { hour:"2-digit", minute:"2-digit", hour12:true, timeZone:"America/New_York" });
 
+    const weights = metaScore ? metaScore.weights : { econ:3, earn:2, premarket:1, news:2 };
     const context = [
       "TODAY: " + today + " | TIME (ET): " + etTime,
-      "REGIME: " + (regime ? regime.regime + " — " + regime.rationale : "Unknown"),
-      "OVERALL BIAS: " + (metaScore ? metaScore.biasLabel + " (score: " + metaScore.weightedScore + ")" : "Unknown"),
-      "RATIONALE: " + (metaScore ? metaScore.rationale : "N/A"),
+      "REGIME: " + (regime ? regime.regime + " (" + (regime.regime === "GNISBN" ? "Good News Is Bad News" : regime.regime === "GNISGN" ? "Good News Is Good News" : regime.regime === "BNISBN" ? "Bad News Is Bad News" : "Bad News Is Good News") + ") — " + regime.rationale : "Unknown"),
+      "OVERALL BIAS: " + (metaScore ? metaScore.biasLabel + " (weighted score: " + metaScore.weightedScore + ")" : "Unknown"),
+      "AI WEIGHTING RATIONALE: " + (metaScore ? metaScore.rationale : "N/A"),
       "",
-      "ECON: " + (econ ? econ.signal.toUpperCase() + " | " + econ.summary : "No data"),
-      "EARNINGS: " + (earn ? earn.signal.toUpperCase() + " | " + earn.summary : "No data"),
-      "PRE-MARKET: " + (premarket ? premarket.signal.toUpperCase() + " | " + premarket.summary : "No data"),
-      "NEWS: " + (news ? news.signal.toUpperCase() + " | " + news.summary : "No data"),
+      "SIGNAL 1 — ECON CALENDAR (weight " + (weights.econ||3) + "x): " + (econ ? econ.signal.toUpperCase() + " (score: " + econ.score + ") | " + econ.summary : "No data"),
+      "SIGNAL 2 — EARNINGS (weight " + (weights.earn||2) + "x): " + (earn ? earn.signal.toUpperCase() + " (score: " + earn.score + ") | " + earn.summary : "No data"),
+      "SIGNAL 3 — PRE-MARKET (weight " + (weights.premarket||1) + "x): " + (premarket ? premarket.signal.toUpperCase() + " (score: " + premarket.score + ") | " + premarket.summary : "No data"),
+      "SIGNAL 4 — MARKET NEWS (weight " + (weights.news||2) + "x): " + (news ? news.signal.toUpperCase() + " (score: " + news.score + ") | " + news.summary : "No data"),
       "",
       "MARKET IMPLICATIONS:",
-      markets && markets.equities ? "Equities — ES: " + markets.equities.ES.bias + ", NQ: " + markets.equities.NQ.bias + ", YM: " + markets.equities.YM.bias + ", RTY: " + markets.equities.RTY.bias : "",
-      markets && markets.metals   ? "Metals — GC: " + markets.metals.GC.bias + ", SI: " + markets.metals.SI.bias + ", HG: " + markets.metals.HG.bias : "",
-      markets && markets.energies ? "Energies — CL: " + markets.energies.CL.bias : "",
-      markets && markets.dxy      ? "Dollar (DXY): " + markets.dxy.DXY.bias : "",
+      markets && markets.equities ? "Stocks — S&P 500: " + markets.equities.ES.bias + ", Nasdaq: " + markets.equities.NQ.bias + ", Dow: " + markets.equities.YM.bias + ", Small-caps: " + markets.equities.RTY.bias : "",
+      markets && markets.metals   ? "Metals — Gold: " + markets.metals.GC.bias + " (" + (markets.metals.GC.implication||"") + "), Silver: " + markets.metals.SI.bias + ", Copper: " + markets.metals.HG.bias : "",
+      markets && markets.energies ? "Energy — Oil: " + markets.energies.CL.bias + " (" + (markets.energies.CL.implication||"") + ")" : "",
+      markets && markets.dxy      ? "Dollar: " + markets.dxy.DXY.bias + " (" + (markets.dxy.DXY.implication||"") + ")" : "",
     ].filter(Boolean).join("\n");
 
     const body = {
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 800,
+      max_tokens: 1200,
       temperature: 0,
       system: "You are a clear, friendly market commentator writing for a non-trader audience. CRITICAL: Reply ONLY with raw JSON, no markdown, no backticks, no explanation.",
       messages: [{ role: "user", content: SUMMARY_PROMPT + "\n\nDATA:\n" + context }]
