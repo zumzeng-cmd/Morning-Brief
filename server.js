@@ -1916,6 +1916,83 @@ app.post("/api/backtest/history/save", function(req, res) {
 
 app.get("/api/backtest/history", function(req, res) { res.json(loadBacktestHistory()); });
 
+
+// ── Live market prices endpoint ───────────────────────────────
+// Fetches current price + % change for all traded instruments via Finnhub
+// Used by Markets tab to show live data and relative strength ranking
+const MARKET_SYMBOLS = [
+  { ticker:"ES",  finnhub:"ES=F",  group:"equities", name:"S&P 500 Futures" },
+  { ticker:"NQ",  finnhub:"NQ=F",  group:"equities", name:"Nasdaq 100 Futures" },
+  { ticker:"YM",  finnhub:"YM=F",  group:"equities", name:"Dow Jones Futures" },
+  { ticker:"RTY", finnhub:"RTY=F", group:"equities", name:"Russell 2000 Futures" },
+  { ticker:"GC",  finnhub:"GC=F",  group:"metals",   name:"Gold Futures" },
+  { ticker:"SI",  finnhub:"SI=F",  group:"metals",   name:"Silver Futures" },
+  { ticker:"HG",  finnhub:"HG=F",  group:"metals",   name:"Copper Futures" },
+  { ticker:"PL",  finnhub:"PL=F",  group:"metals",   name:"Platinum Futures" },
+  { ticker:"CL",  finnhub:"CL=F",  group:"energies", name:"Crude Oil Futures" },
+  { ticker:"NG",  finnhub:"NG=F",  group:"energies", name:"Natural Gas Futures" },
+  { ticker:"DXY", finnhub:"DX=F",  group:"dxy",      name:"US Dollar Index" },
+];
+
+async function fetchLivePrices() {
+  const FINNHUB_KEY = process.env.FINNHUB_API_KEY || "d8gh1phr01qlgcujfjfgd8gh1phr01qlgcujfjg0";
+  const results = {};
+
+  const quotes = await Promise.all(MARKET_SYMBOLS.map(async (s) => {
+    try {
+      const raw = await fetchUrl(
+        "https://finnhub.io/api/v1/quote?symbol=" + s.finnhub + "&token=" + FINNHUB_KEY
+      );
+      const q = JSON.parse(raw);
+      if (!q || q.c === 0 || q.error) return { ticker: s.ticker, price: null, pct: null, prev: null };
+      return {
+        ticker:  s.ticker,
+        group:   s.group,
+        price:   parseFloat(q.c),
+        prev:    parseFloat(q.pc),
+        pct:     parseFloat(q.dp) || 0,
+        change:  parseFloat(q.d)  || 0,
+        high:    parseFloat(q.h),
+        low:     parseFloat(q.l),
+      };
+    } catch(e) {
+      return { ticker: s.ticker, group: s.group, price: null, pct: null, prev: null };
+    }
+  }));
+
+  // Build results map + relative strength rank within each group
+  const groups = {};
+  quotes.forEach(q => {
+    if (!groups[q.group]) groups[q.group] = [];
+    groups[q.group].push(q);
+    results[q.ticker] = q;
+  });
+
+  // Rank within each group by % change (1=strongest/highest, n=weakest/lowest)
+  Object.keys(groups).forEach(g => {
+    const grp = groups[g].filter(q => q.pct !== null);
+    grp.sort((a, b) => b.pct - a.pct); // descending — highest % first
+    grp.forEach((q, i) => {
+      results[q.ticker].rank     = i + 1;       // 1 = strongest
+      results[q.ticker].groupSize = grp.length;
+      results[q.ticker].isStrongest = i === 0;
+      results[q.ticker].isWeakest   = i === grp.length - 1;
+    });
+  });
+
+  return results;
+}
+
+app.get("/api/market-prices", async function(req, res) {
+  try {
+    const prices = await fetchLivePrices();
+    res.json({ prices, timestamp: new Date().toISOString() });
+  } catch(e) {
+    console.error("Market prices error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get("/health", function(req, res) {
   res.json({ status: "ok", apiKeySet: !!process.env.ANTHROPIC_API_KEY });
 });
