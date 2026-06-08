@@ -593,8 +593,15 @@ function switchToMarkets(){
   document.getElementById('btnToday').classList.remove('active');
   document.getElementById('btnHist').classList.remove('active');
   document.getElementById('btnMarkets').classList.add('active');
-  // Auto-refresh live prices when opening markets tab
-  setTimeout(refreshLivePrices, 100);
+  // Auto-load markets if we have analysis results but markets content is empty
+  var mc = document.getElementById('marketsContent');
+  var isEmpty = !mc || mc.querySelector('.market-card') === null;
+  if (isEmpty && lastResults && Object.keys(lastResults).length > 0) {
+    setTimeout(function() { loadMarketsBackground(); }, 100);
+  } else {
+    // Just refresh prices if markets already loaded
+    setTimeout(refreshLivePrices, 100);
+  }
   document.getElementById('datePicker').style.display='none';
   document.getElementById('modeBadge').textContent='MARKETS';
   document.getElementById('modeBadge').className='mode-badge mode-hist';
