@@ -679,7 +679,13 @@ function clearOverride(key,btn){
   // Restore AI score from last known result
   var lastResult = lastResults && lastResults[key];
   if (lastResult) {
-    scores[key] = parseFloat(lastResult.score) || 0;
+    // After US open, premarket score is zeroed — don't restore it to -1/+1
+    var etNowClear = new Date();
+    var etHourClear = parseInt(etNowClear.toLocaleString('en-US',{hour:'2-digit',hour12:false,timeZone:'America/New_York'}));
+    var etMinClear  = etNowClear.getMinutes();
+    var etDayClear  = etNowClear.toLocaleDateString('en-US',{weekday:'short',timeZone:'America/New_York'});
+    var sessionOpenClear = !['Sat','Sun'].includes(etDayClear) && (etHourClear > 9 || (etHourClear === 9 && etMinClear >= 30));
+    scores[key] = (key === 'premarket' && sessionOpenClear) ? 0 : (parseFloat(lastResult.score) || 0);
     setCardResult(key, lastResult);
     // Restore pts display with current weight
     var w = (WEIGHTS && WEIGHTS[key]) || 1;
