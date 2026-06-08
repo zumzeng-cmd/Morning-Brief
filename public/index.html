@@ -733,25 +733,31 @@ function setCardError(key){
 }
 
 function updateBias(){
-  const raw=Object.keys(scores).reduce((sum,k)=>{
-    const s=overrides[k]!=null?(overrides[k]==='bull'?1:overrides[k]==='bear'?-1:0):scores[k];
-    return sum+s*WEIGHTS[k];
+  // Normalize to -1/+1 range — matches server-side meta-score thresholds exactly
+  const totalWeight = Object.keys(WEIGHTS).reduce((s,k)=>s+(WEIGHTS[k]||0),0);
+  const rawWeighted = Object.keys(scores).reduce((sum,k)=>{
+    const s = overrides[k]!=null ? (overrides[k]==='bull'?1:overrides[k]==='bear'?-1:0) : scores[k];
+    return sum + s*(WEIGHTS[k]||0);
   },0);
-  const norm=Math.max(-10,Math.min(10,(raw/MAX)*10));
-  const pct=((norm+10)/20*100).toFixed(1);
-  let label,color;
-  if(norm>=6){label='STRONGLY BULLISH';color='var(--bull)';}
-  else if(norm>=2){label='MILDLY BULLISH';color='#7AE89A';}
-  else if(norm<=-6){label='STRONGLY BEARISH';color='var(--bear)';}
-  else if(norm<=-2){label='MILDLY BEARISH';color='#E87A7A';}
-  else{label='MIXED / NEUTRAL';color='var(--accent2)';}
+  const ws = totalWeight > 0 ? parseFloat((rawWeighted/totalWeight).toFixed(2)) : 0;
+
+  let label, color;
+  if      (ws >=  0.50) { label='STRONGLY BULLISH'; color='var(--bull)'; }
+  else if (ws >=  0.30) { label='BULLISH';           color='var(--bull)'; }
+  else if (ws >=  0.15) { label='MILDLY BULLISH';    color='#7AE89A'; }
+  else if (ws >  -0.15) { label='MIXED / NEUTRAL';   color='var(--accent2)'; }
+  else if (ws >  -0.30) { label='MILDLY BEARISH';    color='#E87A7A'; }
+  else if (ws >  -0.50) { label='BEARISH';           color='var(--bear)'; }
+  else                  { label='STRONGLY BEARISH';  color='var(--bear)'; }
+
   document.getElementById('biasValue').textContent=label;
   document.getElementById('biasValue').style.color=color;
-  document.getElementById('aggScore').textContent=(norm>=0?'+':'')+norm.toFixed(1);
+  document.getElementById('aggScore').textContent=(ws>=0?'+':'')+ws.toFixed(1);
   document.getElementById('aggScore').style.color=color;
+  const pct=((Math.max(-1,Math.min(1,ws))+1)/2*100).toFixed(1);
   document.getElementById('scoreBar').style.width=pct+'%';
   document.getElementById('scoreBar').style.background=color;
-  return {norm, label, color};
+  return {norm:ws, label, color};
 }
 
 function renderSnapshot(entry){
@@ -1012,7 +1018,7 @@ async function runAll(){
       console.error(key,e);
       setCardError(key);
     }
-    await new Promise(r=>setTimeout(r,1500));
+    await new Promise(r=>setTimeout(r,2500)); // 2.5s gap to reduce Sonnet rate limit risk
   }
   lastResults = results;
   await saveSnapshot(results);
