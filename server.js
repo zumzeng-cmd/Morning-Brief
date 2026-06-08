@@ -813,35 +813,9 @@ app.post("/api/analyze", async function(req, res) {
       }
     } else if (topic === "news") {
       prompt = NEWS_PROMPT;
-      if (latestMakeData.news && latestMakeData.news.length > 50) {
-        rawData = latestMakeData.news;
-        console.log("News: using Make.com data");
-      } else {
-        // Weekend detection — CNBC scrape shows stale Friday content on weekends
-        const nowNews = new Date();
-        const etNowNews = new Date(nowNews.toLocaleString("en-US", { timeZone: "America/New_York" }));
-        const dayNews = etNowNews.getDay(); // 0=Sun, 6=Sat
-        const hourNews = etNowNews.getHours();
-        const isWeekend = dayNews === 6 || (dayNews === 0);
-        const isSundayEvening = dayNews === 0 && hourNews >= 17;
-
-        if (isWeekend && !isSundayEvening) {
-          // Saturday or Sunday daytime — use scrape but note it may be stale
-          rawData = await fetchNews();
-          console.log("News: weekend — using CNBC scrape (may show Friday data)");
-        } else if (isSundayEvening) {
-          // Sunday evening — web search for weekend developments + Asia open context
-          rawData = "NO EXTERNAL DATA";
-          const todayStrNews = nowNews.toISOString().slice(0, 10);
-          prompt = NEWS_PROMPT + " It is Sunday evening ET. Search the web for: (1) any major market-moving news that broke this weekend (geopolitical events, Fed commentary, economic surprises, corporate news), (2) the tone of Asian markets as they open tonight, (3) any developments since Friday's US close that could move NQ/ES on Monday open. If nothing significant happened, note that markets closed Friday's session with [summarize Friday's dominant narrative] and no major weekend catalysts have emerged.";
-          useSearch = true;
-          console.log("News: Sunday evening — using web search for weekend developments");
-        } else {
-          // Normal weekday — use CNBC scrape
-          rawData = await fetchNews();
-          console.log("News: using CNBC scrape");
-        }
-      }
+      rawData = latestMakeData.news || await fetchNews();
+      if (latestMakeData.news) console.log("News: using Make.com data");
+      else console.log("News: using CNBC scrape");
     } else {
       return res.status(400).json({ error: "Unknown topic" });
     }
