@@ -687,13 +687,26 @@ function clearOverride(key,btn){
     var sessionOpenClear = !['Sat','Sun'].includes(etDayClear) && (etHourClear > 9 || (etHourClear === 9 && etMinClear >= 30));
     scores[key] = (key === 'premarket' && sessionOpenClear) ? 0 : (parseFloat(lastResult.score) || 0);
     setCardResult(key, lastResult);
-    // Restore pts display with current weight
+    // Force pts to 0 for premarket after open (setCardResult may have reset it)
     var w = (WEIGHTS && WEIGHTS[key]) || 1;
-    var pts = scores[key] * w;
+    var pts = scores[key] * w; // scores[key] is already 0 for premarket after open
     var ptsEl = document.getElementById('pts-' + key);
     if (ptsEl) {
       ptsEl.textContent = (pts >= 0 ? '+' : '') + pts.toFixed(1);
-      ptsEl.className = 'card-pts ' + (pts > 0 ? 'pts-bull' : pts < 0 ? 'pts-bear' : 'pts-neu');
+      ptsEl.className = 'card-pts pts-neu'; // neutral color when zeroed
+      if (pts > 0) ptsEl.className = 'card-pts pts-bull';
+      else if (pts < 0) ptsEl.className = 'card-pts pts-bear';
+    }
+    // Re-add AT OPEN badge for premarket after restore
+    if (key === 'premarket' && sessionOpenClear && ptsEl) {
+      var footer = ptsEl.parentElement;
+      if (footer && !footer.querySelector('.at-open-badge')) {
+        var badge = document.createElement('span');
+        badge.className = 'at-open-badge';
+        badge.textContent = 'AT OPEN ✓';
+        badge.style.cssText = 'font-size:9px;padding:1px 6px;border-radius:2px;background:rgba(74,86,104,0.2);color:var(--muted);border:1px solid var(--border2);letter-spacing:0.06em;margin-left:4px;';
+        footer.appendChild(badge);
+      }
     }
     // Restore signal pill
     var sigEl = document.getElementById('sig-' + key);
