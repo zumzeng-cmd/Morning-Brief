@@ -347,25 +347,29 @@ body.backtest-mode .run-btn:hover:not(:disabled) { background: rgba(255,184,0,0.
   width: 320px; min-width: 320px; max-width: 320px;
   background: var(--surface); border-right: 1px solid var(--border);
   height: 100vh; position: sticky; top: 0; overflow-y: auto;
+  overflow-x: hidden;
   transition: width 0.25s, min-width 0.25s;
   flex-shrink: 0; z-index: 10;
-  scrollbar-width: none; /* Firefox */
-  -ms-overflow-style: none; /* IE/Edge */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  overscroll-behavior: contain; /* prevent scroll bleed to main page */
 }
-.sidebar-week::-webkit-scrollbar { display: none; } /* Chrome/Safari */
+.sidebar-week::-webkit-scrollbar { display: none; }
 .sidebar-week.collapsed {
   width: 36px; min-width: 36px; overflow: hidden;
 }
 .sidebar-toggle {
-  position: absolute; right: -16px; top: 14px;
+  position: fixed; left: 308px; top: 14px;
   width: 32px; height: 32px; border-radius: 50%;
   background: var(--surface); border: 2px solid var(--accent);
   cursor: pointer; display: flex; align-items: center; justify-content: center;
-  font-size: 12px; color: var(--accent); z-index: 20;
-  box-shadow: 0 0 8px rgba(0,255,148,0.25);
-  transition: all 0.2s;
+  font-size: 12px; color: var(--accent); z-index: 100;
+  box-shadow: 0 0 10px rgba(0,255,148,0.35);
+  transition: left 0.25s, background 0.2s, box-shadow 0.2s;
 }
-.sidebar-toggle:hover { background: rgba(0,255,148,0.1); box-shadow: 0 0 12px rgba(0,255,148,0.4); }
+.sidebar-toggle:hover { background: rgba(0,255,148,0.15); box-shadow: 0 0 16px rgba(0,255,148,0.5); }
+.sidebar-week.collapsed ~ * .sidebar-toggle,
+body.sidebar-collapsed .sidebar-toggle { left: 20px; }
 .sidebar-inner { padding: 16px 14px; opacity: 1; transition: opacity 0.15s; }
 .sidebar-week.collapsed .sidebar-inner { opacity: 0; pointer-events: none; }
 .sidebar-hdr {
@@ -1702,10 +1706,19 @@ function toggleSidebar() {
   var btn = document.getElementById('sidebarToggle');
   sb.classList.toggle('collapsed', sidebarCollapsed);
   btn.textContent = sidebarCollapsed ? '▶' : '◀';
+  btn.style.left = sidebarCollapsed ? '4px' : '308px';
   try { localStorage.setItem('sidebarCollapsed', sidebarCollapsed ? '1' : '0'); } catch(e){}
 }
 (function(){
-  try { if(localStorage.getItem('sidebarCollapsed')==='1') { sidebarCollapsed=true; var sb=document.getElementById('sidebarWeek'); if(sb){sb.classList.add('collapsed'); var btn=document.getElementById('sidebarToggle'); if(btn) btn.textContent='▶';} } } catch(e){}
+  try {
+    if(localStorage.getItem('sidebarCollapsed')==='1') {
+      sidebarCollapsed=true;
+      var sb=document.getElementById('sidebarWeek');
+      if(sb) sb.classList.add('collapsed');
+      var btn=document.getElementById('sidebarToggle');
+      if(btn){ btn.textContent='▶'; btn.style.left='4px'; }
+    }
+  } catch(e){}
 })();
 
 function formatSidebarDate(dateStr) {
@@ -1733,8 +1746,9 @@ function renderWeekAhead(data) {
   // Group by date
   var days = {};
   var allDates = new Set();
-  (data.econ||[]).forEach(function(e){ allDates.add(e.date); if(!days[e.date]) days[e.date]={econ:[],earn:[]}; days[e.date].econ.push(e); });
-  (data.earnings||[]).forEach(function(e){ allDates.add(e.date); if(!days[e.date]) days[e.date]={econ:[],earn:[]}; days[e.date].earn.push(e); });
+  (data.econ||[]).forEach(function(e){ allDates.add(e.date); if(!days[e.date]) days[e.date]={econ:[],earn:[],notable:[]}; days[e.date].econ.push(e); });
+  (data.earnings||[]).forEach(function(e){ allDates.add(e.date); if(!days[e.date]) days[e.date]={econ:[],earn:[],notable:[]}; days[e.date].earn.push(e); });
+  (data.notable||[]).forEach(function(e){ allDates.add(e.date); if(!days[e.date]) days[e.date]={econ:[],earn:[],notable:[]}; days[e.date].notable.push(e); });
 
   var sortedDates = Array.from(allDates).sort();
   var html = '';
@@ -1745,6 +1759,9 @@ function renderWeekAhead(data) {
     html += '<div class="sidebar-day-label' + (todayFlag?' today-label':'') + '">' + formatSidebarDate(date) + (todayFlag?' · TODAY':'') + '</div>';
 
     // Econ events
+    if (dayData.econ.length > 0) {
+      html += '<div style="font-size:8px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);opacity:0.6;margin:4px 0 3px;padding-bottom:2px;border-bottom:1px solid var(--border);">📊 ECONOMIC</div>';
+    }
     dayData.econ.forEach(function(e) {
       var cls = 'sidebar-event';
       if (todayFlag) cls += ' today';
@@ -1763,12 +1780,17 @@ function renderWeekAhead(data) {
         : '<span title="Tier 2 — Medium Impact" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#CC6600;margin-left:5px;vertical-align:middle;"></span>';
       html += '<div class="'+cls+'">';
       html += '<div class="sidebar-event-name">'+e.name+tierBadge+'</div>';
-      html += '<div class="sidebar-event-meta">'+(e.status==='released'?'Released':'Scheduled')+(e.estimate!==null?' · Est: '+e.estimate:'')+'</div>';
+      var timeDisp='';
+      if(e.time&&e.time!=='TBD'){try{var tp=e.time.split(':');var td2=new Date();td2.setUTCHours(parseInt(tp[0]),parseInt(tp[1]||0),0,0);timeDisp=td2.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true,timeZone:'America/New_York'})+' ET · ';}catch(te){}}
+      html += '<div class="sidebar-event-meta">'+timeDisp+(e.status==='released'?'Released':'Scheduled')+(e.estimate!==null?' · Est: '+e.estimate:'')+'</div>';
       html += resultHtml;
       html += '</div>';
     });
 
     // Earnings
+    if (dayData.earn.length > 0) {
+      html += '<div style="font-size:8px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);opacity:0.6;margin:6px 0 3px;padding-bottom:2px;border-bottom:1px solid var(--border);">📈 EARNINGS</div>';
+    }
     dayData.earn.forEach(function(e) {
       var cls = 'sidebar-event';
       if (todayFlag) cls += ' today';
@@ -1794,6 +1816,17 @@ function renderWeekAhead(data) {
       html += resultHtml;
       html += '</div>';
     });
+
+    // Notable events (IPOs etc)
+    if (dayData.notable && dayData.notable.length > 0) {
+      html += '<div style="font-size:8px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);opacity:0.6;margin:6px 0 3px;padding-bottom:2px;border-bottom:1px solid var(--border);">⭐ NOTABLE</div>';
+      dayData.notable.forEach(function(n) {
+        html += '<div class="sidebar-event'+(todayFlag?' today':'')+'">';
+        html += '<div class="sidebar-event-name">'+n.type+': '+n.name+(n.symbol?' ('+n.symbol+')':'')+'</div>';
+        html += '<div class="sidebar-event-meta">'+n.detail+(n.priceRange?' · '+n.priceRange:'')+'</div>';
+        html += '</div>';
+      });
+    }
   });
 
   if (!html) html = '<div class="sidebar-empty">No major events this week.</div>';
