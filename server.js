@@ -2299,9 +2299,33 @@ async function fetchWeekAhead() {
   econEvents.sort((a,b) => a.date.localeCompare(b.date) || (a.tier - b.tier));
   earnEvents.sort((a,b) => a.date.localeCompare(b.date));
 
-  const data = { weekOf: fromStr, weekEnd: toStr, econ: econEvents, earnings: earnEvents, fetchedAt: new Date().toISOString() };
+  // ── Notable events (IPOs, Fed speeches, major expirations) ──
+  const notableEvents = [];
+  try {
+    const ipoRaw = await fetchUrl(
+      "https://financialmodelingprep.com/stable/ipos-confirmed-domestic?from=" + fromStr + "&to=" + toStr + "&apikey=" + FMP_KEY
+    );
+    const ipoJson = JSON.parse(ipoRaw);
+    if (Array.isArray(ipoJson)) {
+      ipoJson.slice(0, 8).forEach(ipo => {
+        const date = (ipo.date || ipo.ipoDate || "").slice(0,10);
+        if (!date) return;
+        notableEvents.push({
+          date, type: "IPO",
+          name: ipo.company || ipo.name || ipo.symbol || "Unknown",
+          symbol: ipo.symbol || "",
+          detail: ipo.exchange ? ipo.exchange + " IPO" : "IPO",
+          priceRange: ipo.priceRange || (ipo.price ? "$" + ipo.price : null)
+        });
+      });
+    }
+  } catch(e) { console.log("IPO fetch error:", e.message); }
+
+  notableEvents.sort((a,b) => a.date.localeCompare(b.date));
+
+  const data = { weekOf: fromStr, weekEnd: toStr, econ: econEvents, earnings: earnEvents, notable: notableEvents, fetchedAt: new Date().toISOString() };
   weekAheadCache = { data, fetchedAt: Date.now(), weekKey };
-  console.log("WeekAhead: fetched", econEvents.length, "econ events,", earnEvents.length, "earnings");
+  console.log("WeekAhead: fetched", econEvents.length, "econ events,", earnEvents.length, "earnings,", notableEvents.length, "notable");
   return data;
 }
 
