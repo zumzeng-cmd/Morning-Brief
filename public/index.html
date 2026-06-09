@@ -870,7 +870,7 @@ function setCardResult(key,result){
     }
     ['econ','earn','premarket'].forEach(function(k){
       const sigEl = document.getElementById('sig-'+k);
-      if(sigEl){ sigEl.textContent = '&#9888;&#65039; OVERRIDDEN'; sigEl.className = 'card-sig'; sigEl.style.color='#FFB800'; sigEl.style.background='rgba(255,184,0,0.1)'; }
+      if(sigEl){ sigEl.textContent = '⚠️ SHOCK'; sigEl.className = 'card-sig'; sigEl.style.color='#FFB800'; sigEl.style.background='rgba(255,184,0,0.1)'; sigEl.style.border='1px solid rgba(255,184,0,0.3)'; }
     });
   }
 
@@ -884,7 +884,7 @@ function setCardResult(key,result){
 
   const pts = effectiveScore * (WEIGHTS[key]||1);
   const ptsClass=pts>0?'pts-bull':pts<0?'pts-bear':'pts-neu';
-  document.getElementById('sig-'+key).textContent = isShockNews ? '&#9888;&#65039; SHOCK TRIGGER' : sig;
+  document.getElementById('sig-'+key).textContent = isShockNews ? '⚠️ SHOCK' : sig;
   document.getElementById('sig-'+key).className='card-sig '+(isShockNews?'sig-bear':sigClass);
   if(isShockNews){ document.getElementById('sig-'+key).style.background='rgba(255,68,68,0.2)'; document.getElementById('sig-'+key).style.color='#FF4444'; }
   document.getElementById('body-'+key).textContent = isShockNews ? cleanSummary : (result.summary||'');
