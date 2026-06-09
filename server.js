@@ -684,20 +684,16 @@ async function callClaudeWithRetry(prompt, data, useWebSearch) {
 
 // ── Prompts ───────────────────────────────────────────────────
 const ECON_PROMPT = [
-  "From this economic calendar data, extract ONLY the following report types and IGNORE everything else.",
-  "TIER 1 (score these always): Fed rate decision, FOMC statement, NFP (Non-Farm Payrolls), CPI, Core CPI, PCE, Core PCE.",
-  "TIER 2 (score if released today): JOLTS, Initial Jobless Claims, Continuing Claims, ADP Employment, Unemployment Rate, Average Hourly Earnings, PPI, Core PPI.",
-  "TIER 3 (score only if no TIER 1 or TIER 2 data today): GDP, ISM Manufacturing, ISM Services, PMI, University of Michigan Sentiment, Consumer Confidence (Conference Board), EIA Crude Oil Inventories, EIA Natural Gas Storage.",
-  "USD ONLY RULE: ONLY score USD-denominated reports. Completely ignore ALL non-USD data — Japanese, European, Chinese, Australian, Canadian, UK or any other country's data is irrelevant regardless of impact label. The only exception is ECB, BOE, or BOJ rate decisions which move USD indirectly.",
-  "EXCLUDE ENTIRELY regardless of impact label or currency tag: Consumer Inflation Expectations, CB Employment Trends, NY Fed Consumer Expectations, Dallas Fed, Richmond Fed, Kansas Fed, Chicago PMI, Redbook, NFIB Small Business, Building Permits, Housing Starts, Existing Home Sales, New Home Sales, Pending Home Sales, Durable Goods Orders, Factory Orders, Wholesale Inventories, Trade Balance, Current Account, Treasury Budget, Baker Hughes Rig Count, any state-level data.",
-  "NO-DATA RULE: If the ONLY reports available today are from the EXCLUDE list, are non-USD, or are all LOW impact, score 0 neutral. Do NOT score a low-tier or non-USD miss as directional. State clearly that no actionable USD data was released today.",
-  "For each included report: name, actual vs forecast, beat or miss.",
+  "You are reviewing today's US economic calendar for a day trader. USD data only — ignore all non-USD events.",
+  "HIGH IMPACT EVENTS to score: NFP, CPI, Core CPI, PCE, Core PCE, Fed rate decision, FOMC statement, GDP, JOLTS, Initial Jobless Claims, ADP Employment, Unemployment Rate, PPI, ISM Manufacturing, ISM Services, Retail Sales, University of Michigan Sentiment.",
+  "EXCLUDE ALWAYS: Consumer Inflation Expectations, CB Employment Trends, Atlanta/Dallas/Richmond/Cleveland/NY Fed surveys, GDPNow, Treasury auctions, NFIB, Baker Hughes, API crude, Redbook, non-USD events.",
+  "USD ONLY RULE: Completely ignore all non-USD data regardless of impact.",
+  "SUMMARY FORMAT: If no high impact USD events today — write: 'No major economic events scheduled for today.' Then add one sentence: 'Next up: [Event name] on [day], scheduled for [time] ET.' Score 0 neutral. Keep it conversational — no tier labels, no technical jargon.",
+  "If a high impact event DID release — state the result in plain English (e.g. 'CPI came in at 3.4% vs 3.3% expected — slightly hotter than forecast, keeping the higher-for-longer narrative alive.').",
+  "CARRY-FORWARD RULE: If no high impact data today but NFP, CPI, PCE, or FOMC released in the prior session (yesterday or last Friday if today is Monday), carry it forward at half score (±0.5) with plain language: 'No new data today, but [event] from [day] is still influencing markets — [plain English result].'",
+  "JOBLESS CLAIMS: Higher than forecast = bad (more unemployed). Lower = good (fewer unemployed).",
+  "JOLTS: Higher openings = bullish (strong labor demand). Lower = bearish.",
   "REGIME_PLACEHOLDER",
-  "TIER 1 (dominates everything): Fed rate decision, FOMC, NFP, CPI, PCE. TIER 2 (high weight): JOLTS, Jobless Claims, ADP, Unemployment Rate, PPI. TIER 3 (medium): GDP, ISM, PMI, Sentiment. TIER 4 (lower): Oil/gas inventories, metals.",
-  "JOBLESS CLAIMS RULE: Initial Jobless Claims HIGHER than forecast = BEARISH (more people unemployed = labor weakening). Claims LOWER than forecast = BULLISH (fewer unemployed = strong labor). This is the opposite of most indicators — a higher number is bad. 225K vs 213K forecast = MISS = BEARISH.",
-  "JOLTS RULE: JOLTS job openings HIGHER than forecast = BULLISH (more demand for workers). JOLTS lower = bearish.",
-  "TODAY-ONLY RULE: Only score reports confirmed released or scheduled for TODAY at full weight. Exception: CARRY-FORWARD RULE — if NO Tier 1 or Tier 2 USD data was released today, but a major Tier 1 report (NFP, CPI, PCE, FOMC) was released in the PRIOR trading session (yesterday or last Friday if today is Monday), carry it forward at HALF score (0.5 instead of 1, or -0.5 instead of -1) with a note it is carry-over context. This reflects that the market is still trading the prior session's data even without a fresh print. Example: If NFP beat on Friday and today is Monday with no new data, score +0.5 bull with summary noting 'Carry-over from Friday NFP beat — market still pricing higher-for-longer.' Do NOT carry forward Tier 2 or lower data.",
-  "MEGA-CAP STRICT RULE: any miss is a miss regardless of size.",
   "Score: bull=1, bear=-1, neutral=0.",
   // ── MODIFIED: guidance is not applicable for econ, explicitly set null ──
   "CATALYST FLAGS: After scoring, you must also identify which specific catalysts are present in the data. Set each flag to true or false based on what you actually read — do not infer or assume. These flags drive commodity and instrument scoring downstream so accuracy matters. " +
@@ -725,17 +721,13 @@ const ECON_PROMPT = [
 ].join(" ");
 
 const EARN_PROMPT = [
-  "From this earnings data, score based on INDEX IMPACT not equal weighting.",
-  "MEGA-CAP INDEX HEAVYWEIGHTS (highest weight): NVDA, AAPL, MSFT, META, GOOGL, GOOG, AMZN, TSLA, AVGO, NFLX, AMD.",
-  "LARGE-CAP HIGH IMPACT (significant weight): JPM, GS, BAC, MS, WFC, C, V, MA, UNH, LLY, JNJ, XOM, CVX, CRM, ORCL, ADBE, QCOM, MU, NOW.",
-  "SMALL/MID CAP (low weight): Everything else.",
-  "DATA SOURCE: non-GAAP adjusted EPS — the correct basis vs analyst estimates.",
-  "MEGA-CAP STRICT RULE: any miss is a miss regardless of size. Trust the BEAT/MISS/IN-LINE label in the data.",
-  "CRITICAL: Only score based on CONFIRMED actual EPS in the data. If all TBD, score 0 neutral — do NOT guess.",
-  "IN-LINE RULE: IN-LINE for a mega-cap = neutral. Revenue beats/misses also factor in.",
-  "FORWARD GUIDANCE RULE: For mega-caps, forward guidance is often MORE important than the EPS beat/miss. Strong guidance that beats consensus = add +0.5 to score. Weak or below-consensus guidance = subtract 0.5. Reaffirmed full-year targets = mild positive. If guidance is included in the data, factor it into your summary and score.",
-  "SUMMARY RULE: For any mega-cap result, your summary must include: (1) EPS beat/miss, (2) revenue beat/miss, (3) forward guidance vs consensus if available, (4) any key metric like AI revenue, cloud growth, or segment performance that moves NQ/ES.",
-  "Score: bull=1, bear=-1, neutral=0. You may use 0.5 increments when guidance meaningfully changes the picture.",
+  "You are reviewing today's earnings calendar for a day trader focused on index futures (NQ/ES).",
+  "MAJOR COMPANIES (score these if they reported): NVDA, AAPL, MSFT, META, GOOGL, AMZN, TSLA, AVGO, NFLX, AMD, QCOM, JPM, GS, BAC, MS, XOM, CVX, LLY, UNH, COST, WMT, ORCL, CRM, ADBE, MU, NOW, V, MA.",
+  "DATA SOURCE: non-GAAP adjusted EPS vs analyst estimates.",
+  "ONLY score CONFIRMED actual EPS results. If all TBD, score 0 neutral.",
+  "SUMMARY FORMAT: If no major companies reported today — write: 'No major earnings today.' Then add one sentence: 'Next up: [Company] reports [day] [BMO/AMC].' Score 0 neutral. Keep it conversational.",
+  "If earnings DID release — state results in plain English: '[Company] beat EPS by X%, revenue [beat/missed], guidance [raised/lowered/reaffirmed] — [bullish/bearish] for [NQ/sector].' Include guidance as it often matters more than the beat.",
+  "Score: bull=1, bear=-1, neutral=0. Use 0.5 increments when guidance changes the picture.",
   // ── MODIFIED: tightened staleness rule — stale reports omitted entirely ──
   "STALENESS RULE: Reports are scored ONLY within a strict time window. [TODAY] BMO (before market open) reports: score only if current time is before 10:00am ET. [TODAY] AMC (after market close) reports: score only after 4:00pm ET on that day. [YEST] reports: score ONLY if current time is before 10:00am ET on the NEXT trading day — i.e. the morning after they reported. If current time is past 10:00am ET, [YEST] reports are fully priced in and MUST be completely ignored — set score to 0 and do not mention them. CRITICAL: A report from 2, 3, 4 or more days ago (e.g. AVGO reported June 3 and today is June 8) is ANCIENT — it is NOT [YEST], it has zero scoring weight, and must not appear in your analysis under any circumstances. Only reports from TODAY or genuinely YESTERDAY count. If no valid in-window reports exist, score 0 neutral and state that no scoreable earnings exist today.",
   // ── MODIFIED: explicit JSON schema requiring guidance field ──
@@ -771,7 +763,10 @@ const PREMARKET_PROMPT = [
   "EUROPE SCORE: Same count for STOXX 600, DAX, FTSE 100, AEX, CAC 40. Use FINAL CLOSING prices — if European markets closed before a major US session event, note that in summary.",
   "US FUTURES: Use CURRENT pre-market direction of NQ, ES, YM as primary signal — these reflect the most recent pricing.",
   "WEIGHTING RULE: (1) Current US futures wins outright — they reflect the most recent information. (2) If no US futures data, Europe final close wins over Asia. (3) Asia only if Europe unavailable.",
-  "FINAL SIGNAL EXAMPLES: US futures bearish overrides earlier bullish Europe close. Asia BEARISH + Europe BULLISH = BULL (Europe wins). All bearish = BEAR.",
+  "PARTIAL REBOUND RULE: If US cash closed sharply lower (>0.5% down) and overnight futures show only a small partial rebound (<0.5% up), score NEUTRAL not BULL — a small bounce after a large drop is consolidation, not a bullish reversal. Only score BULL if futures are up meaningfully OR if a clear new catalyst (deal signed, de-escalation confirmed) justifies the move.",
+  "TIMELINE RULE: Catalysts must be evaluated in CHRONOLOGICAL ORDER. If a positive catalyst (e.g. peace deal comment) was followed by a negative catalyst (e.g. military strike, market crash), the LATER event takes precedence. A pre-shock bullish statement does not override a post-shock market reaction. Ask: what is the MOST RECENT market-moving event? That is what the score should reflect.",
+  "MARKET SHOCK RULE: If you detect language suggesting a major market shock occurred during the session (military strikes, crash >1.5%, emergency event) — score BEARISH regardless of any earlier bullish pre-market data. The shock resets the signal. A small overnight bounce after a shock is noise, not a reversal.",
+  "FINAL SIGNAL EXAMPLES: US futures down = BEAR. Cash crashed on shock then tiny overnight bounce = BEAR or NEUTRAL. Asia BEARISH + Europe BULLISH = BULL (Europe wins). All bearish = BEAR. Shock occurred during session = BEAR.",
   "SUMMARY: State Asia final close (X bullish, Y bearish of 5), Europe final close (X bullish, Y bearish of 5), current US futures direction. Note if markets reversed on late-breaking news. Two sentences max.",
   "Score: bull=1, bear=-1, neutral=0.",
   "JSON SCHEMA: {\"signal\":\"bull|bear|neutral\",\"summary\":\"2 sentence summary\",\"score\":1,\"guidance\":null}"
@@ -975,6 +970,14 @@ app.post("/api/analyze", async function(req, res) {
           useSearch = true;
           console.log("Premarket: using web search —", dayET === 0 ? "Sunday evening" : dayET === 1 && hourET2 < 10 ? "Monday pre-open (" + hourET2 + "h ET)" : "Finnhub fallback");
         }
+      }
+      // If news already ran and detected a market shock, inject timeline context
+      // The shock occurred AFTER any pre-market bullish data was recorded
+      const newsResultForPM = req.body && req.body.newsResult;
+      const shockInNews = newsResultForPM && newsResultForPM.summary && newsResultForPM.summary.includes('MARKET_SHOCK_OVERRIDE');
+      if (shockInNews && rawData) {
+        rawData = rawData + "\n\n[IMPORTANT TIMELINE CONTEXT: A MARKET SHOCK was detected in today's news session — military strike, major crash, or emergency event. This shock occurred AFTER the pre-market data above was recorded. Pre-market data reflects pre-shock conditions. Apply MARKET SHOCK RULE: score BEARISH. A small overnight bounce after a shock session is noise, not a reversal.]";
+        console.log("Premarket: market shock context injected from news result");
       }
     } else if (topic === "news") {
       prompt = NEWS_PROMPT;
