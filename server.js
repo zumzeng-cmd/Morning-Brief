@@ -706,9 +706,9 @@ const ECON_PROMPT = [
   "\"guidance\":null," +
   "\"catalysts\":{" +
   "\"oilSupplyShock\":false," +        // Active supply disruption: OPEC cuts, Middle East conflict blocking supply routes, pipeline outage
-  "\"oilSupplyUnwind\":false," +       // Supply disruption ENDING: ceasefire, deal, reopening, de-escalation removes premium
+  "\"oilSupplyUnwind\":false," +       // Supply disruption risk REDUCING: ceasefire, deal, reopening, or credible diplomatic progress that reduces geopolitical supply risk premium — set true if geopoliticalDeEscalation is true AND the conflict involves oil-producing regions or supply routes
   "\"geopoliticalEscalation\":false," + // Active military conflict, attacks, invasion, missile strikes, war escalating
-  "\"geopoliticalDeEscalation\":false," + // Conflict ENDING or reducing: ceasefire, peace deal, withdrawal, hostilities paused
+  "\"geopoliticalDeEscalation\":false," + // Conflict risk REDUCING: ceasefire, peace deal, withdrawal, hostilities paused OR diplomatic progress — negotiations underway, deal being discussed, potential agreement signaled by officials, talks progressing. Set true even if deal not confirmed — credible diplomatic signal that reduces risk premium is sufficient
   "\"fedHawkish\":false," +            // Fed signaling higher rates, delays cuts, higher-for-longer, hawkish tone
   "\"fedDovish\":false," +             // Fed signaling cuts, pivot, easing, accommodative
   "\"inflationHot\":false," +          // CPI/PCE/PPI above expectations, inflation accelerating
@@ -746,9 +746,9 @@ const EARN_PROMPT = [
   "\"guidance\":null," +
   "\"catalysts\":{" +
   "\"oilSupplyShock\":false," +        // Active supply disruption: OPEC cuts, Middle East conflict blocking supply routes, pipeline outage
-  "\"oilSupplyUnwind\":false," +       // Supply disruption ENDING: ceasefire, deal, reopening, de-escalation removes premium
+  "\"oilSupplyUnwind\":false," +       // Supply disruption risk REDUCING: ceasefire, deal, reopening, or credible diplomatic progress that reduces geopolitical supply risk premium — set true if geopoliticalDeEscalation is true AND the conflict involves oil-producing regions or supply routes
   "\"geopoliticalEscalation\":false," + // Active military conflict, attacks, invasion, missile strikes, war escalating
-  "\"geopoliticalDeEscalation\":false," + // Conflict ENDING or reducing: ceasefire, peace deal, withdrawal, hostilities paused
+  "\"geopoliticalDeEscalation\":false," + // Conflict risk REDUCING: ceasefire, peace deal, withdrawal, hostilities paused OR diplomatic progress — negotiations underway, deal being discussed, potential agreement signaled by officials, talks progressing. Set true even if deal not confirmed — credible diplomatic signal that reduces risk premium is sufficient
   "\"fedHawkish\":false," +            // Fed signaling higher rates, delays cuts, higher-for-longer, hawkish tone
   "\"fedDovish\":false," +             // Fed signaling cuts, pivot, easing, accommodative
   "\"inflationHot\":false," +          // CPI/PCE/PPI above expectations, inflation accelerating
@@ -783,7 +783,7 @@ const NEWS_PROMPT = [
   "LEVEL 2 - MEDIUM: Sector news, individual large-cap catalyst.",
   "LEVEL 1 - LOW (do not score): Routine analyst calls, minor company news.",
   "FRESHNESS HIERARCHY — CRITICAL FOR DAY TRADING: Score based on what the market is trading TODAY, not stale carry-over narratives. Apply this priority order: (1) Events that broke SINCE the last US market close (overnight, weekend) take highest priority — the market has not yet priced these. (2) Events from TODAY's session take second priority. (3) Data or news from PRIOR trading sessions (yesterday, last week) is already priced in and should NOT dominate scoring. Example: If today is Monday and Iran announced a ceasefire over the weekend, that is FRESHER and MORE MARKET-MOVING than Friday's jobs data which traded all day Friday and was priced over the weekend. The jobs data becomes background context, not the primary driver.",
-  "GEOPOLITICAL DE-ESCALATION RULE: A major geopolitical resolution (ceasefire, end of hostilities, peace deal) is a BULLISH Level 4 catalyst for equities — it removes the risk premium that was suppressing markets. Score BULLISH even if a hawkish macro backdrop exists in older data. The de-escalation is new; the macro narrative is stale.",
+  "GEOPOLITICAL DE-ESCALATION RULE: Any credible reduction in geopolitical risk is a BULLISH catalyst for equities — it removes the risk premium suppressing markets. This includes: confirmed ceasefire or end of hostilities (Level 4), peace deal signed (Level 4), AND credible diplomatic progress — a senior official signaling a deal is close, negotiations underway, potential agreement within days (Level 3). You do NOT need a confirmed resolution to score bullish — credible de-escalation signals are sufficient. Set geopoliticalDeEscalation: true and oilSupplyUnwind: true if the conflict involves oil-producing regions. Score BULLISH even if a hawkish macro backdrop exists in older data.",
   "HAWKISH RULE: Rate-cut delay / higher-for-longer narrative scores BEARISH — BUT only if that narrative is the FRESHEST dominant catalyst. If a geopolitical resolution or other fresh Level 4+ event occurred more recently, the hawkish narrative is demoted to background context.",
   "TIEBREAKER RULE: When two catalysts conflict, the FRESHER one wins. If both are equally fresh, the LARGER market mover wins.",
   "IMPORTANT: Do NOT include level labels in your summary. Write natural plain English. State what is MOVING markets today specifically.",
@@ -796,9 +796,9 @@ const NEWS_PROMPT = [
   "\"guidance\":null," +
   "\"catalysts\":{" +
   "\"oilSupplyShock\":false," +        // Active supply disruption: OPEC cuts, Middle East conflict blocking supply routes, pipeline outage
-  "\"oilSupplyUnwind\":false," +       // Supply disruption ENDING: ceasefire, deal, reopening, de-escalation removes premium
+  "\"oilSupplyUnwind\":false," +       // Supply disruption risk REDUCING: ceasefire, deal, reopening, or credible diplomatic progress that reduces geopolitical supply risk premium — set true if geopoliticalDeEscalation is true AND the conflict involves oil-producing regions or supply routes
   "\"geopoliticalEscalation\":false," + // Active military conflict, attacks, invasion, missile strikes, war escalating
-  "\"geopoliticalDeEscalation\":false," + // Conflict ENDING or reducing: ceasefire, peace deal, withdrawal, hostilities paused
+  "\"geopoliticalDeEscalation\":false," + // Conflict risk REDUCING: ceasefire, peace deal, withdrawal, hostilities paused OR diplomatic progress — negotiations underway, deal being discussed, potential agreement signaled by officials, talks progressing. Set true even if deal not confirmed — credible diplomatic signal that reduces risk premium is sufficient
   "\"fedHawkish\":false," +            // Fed signaling higher rates, delays cuts, higher-for-longer, hawkish tone
   "\"fedDovish\":false," +             // Fed signaling cuts, pivot, easing, accommodative
   "\"inflationHot\":false," +          // CPI/PCE/PPI above expectations, inflation accelerating
@@ -1201,264 +1201,58 @@ app.get("/api/history/:dateKey", function(req, res) {
 // All bias, bestSetup, and setupDirection are calculated server-side
 // using deterministic rules — Claude never decides instrument direction.
 const MARKETS_PROMPT = [
-  "You are a senior futures trader. Based on the morning brief signals below, write ONE specific implication sentence and ONE key level for each instrument.",
-  "INSTRUMENTS: ES, NQ, YM, RTY (equities), GC, SI, HG, PL (metals), CL, NG (energies), DXY.",
-  "FOR EACH INSTRUMENT provide ONLY:",
-  "1. implication: ONE sentence on what today's specific drivers mean for this instrument. Name the actual catalyst (e.g. oil supply shock from Middle East war, geopolitical escalation, yield spike, dollar strength, Asia weakness). CRITICAL: Your sentence MUST reflect the instrument's actual price direction — if crude oil is rising due to geopolitical risk, say it is under upward pressure from supply risk premium. If gold has a safe-haven bid competing with dollar strength, explain the tension. Be directionally accurate and specific.",
-  "NATURAL GAS SPECIAL RULE: NG (Natural Gas) is driven by weather, storage reports, and LNG demand — NOT by macro conditions, geopolitics, or equity sentiment. For NG, ONLY reference actual NG-specific catalysts (storage builds/draws, heating/cooling demand, LNG exports, pipeline issues). If no NG-specific catalyst exists today, write: 'Natural gas lacks a directional catalyst today — price action will be driven by technicals and the next storage report.' Do NOT mention risk-off, Asia weakness, or rate policy for NG.",
-
-  "DO NOT include bias, signal, bestSetup, setupDirection, or divergence — the server calculates these.",
-  "RETURN a JSON object with this exact structure:",
-  "{ \"equities\": { \"ES\": {\"implication\":\"..\"}, \"NQ\":{\"implication\":\"..\"}, \"YM\":{\"implication\":\"..\"}, \"RTY\":{\"implication\":\"..\"} },",
-  "\"metals\": { \"GC\":{\"implication\":\"..\"}, \"SI\":{\"implication\":\"..\"}, \"HG\":{\"implication\":\"..\"}, \"PL\":{\"implication\":\"..\"} },",
-  "\"energies\": { \"CL\":{\"implication\":\"..\"}, \"NG\":{\"implication\":\"..\"} },",
-  "\"dxy\": { \"DXY\":{\"implication\":\"..\"} } }"
-].join(" ");
-
-// ── Deterministic instrument scoring ─────────────────────────
-// Derives all instrument bias/bestSetup/direction from card signals.
-// Never relies on Claude for directional decisions.
-function scoreInstruments(econ, earn, premarket, news, metaScore, regime, sessionOpen) {
-  // ── Card signals (regime-adjusted) ──
-  const econSig    = econ      ? econ.signal      : "neutral";
-  const newsSig    = news      ? news.signal      : "neutral";
-  // After US open, premarket signal is zeroed — don't let overnight data
-  // drive commodity/instrument scoring once the session is live
-  const preSig     = (sessionOpen && premarket) ? "neutral" : (premarket ? premarket.signal : "neutral");
-  const preScore   = (sessionOpen && premarket) ? 0 : (premarket ? parseFloat(premarket.score) || 0 : 0);
-  const econScore  = econ      ? parseFloat(econ.score)      || 0 : 0;
-  const newsScore  = news      ? parseFloat(news.score)      || 0 : 0;
-  // preScore declared above with session-open check
-  const earnScore  = earn      ? parseFloat(earn.score)      || 0 : 0;
-  const overallWS  = metaScore ? parseFloat(metaScore.weightedScore) || 0 : 0;
-
-  // ── Catalyst flags — read from Claude's structured output, regex fallback for old results ──
-  const newsCats = (news && news.catalysts) || {};
-  const econCats = (econ && econ.catalysts) || {};
-
-  // OR-merge: if either card sets a flag true, it's true
-  const mergedCats = {};
-  const allCatKeys = new Set([...Object.keys(newsCats), ...Object.keys(econCats)]);
-  allCatKeys.forEach(k => { mergedCats[k] = !!(newsCats[k] || econCats[k]); });
-
-  // Regex fallback for cached results without catalysts field
-  if (!news || news.catalysts === undefined) {
-    const nt = ((news ? news.summary : "") + " " + (news ? news.guidance||"" : "") + " " + (econ ? econ.summary : "")).toLowerCase();
-    const deEsc = /ceasefire|de-escalat|end of operation|peace deal|truce|withdrawal|tensions eas|iran.*end|israel.*end|end.*military/.test(nt);
-    if (!mergedCats.oilSupplyShock)         mergedCats.oilSupplyShock         = /middle east|iran|israel|opec cut|supply shock|houthi|oil supply|production cut/.test(nt) && !deEsc;
-    if (!mergedCats.oilSupplyUnwind)        mergedCats.oilSupplyUnwind        = /middle east|iran|israel|opec cut|supply shock|houthi|oil supply|production cut/.test(nt) && deEsc;
-    if (!mergedCats.geopoliticalEscalation) mergedCats.geopoliticalEscalation = /war|military|attack|invasion|missile|escalat|crisis|conflict|iran|russia|terror/.test(nt) && !deEsc;
-    if (!mergedCats.geopoliticalDeEscalation) mergedCats.geopoliticalDeEscalation = /ceasefire|de-escalat|end of operation|peace deal|truce|withdrawal|tensions eas/.test(nt);
-    if (!mergedCats.fedDovish)              mergedCats.fedDovish              = /fed cut|rate cut|pivot|dovish|easing|accommodative/.test(nt);
-    if (!mergedCats.inflationHot)           mergedCats.inflationHot           = /inflation|cpi|pce|price pressure|inflationary/.test(nt);
-    if (!mergedCats.chinaStimulus)          mergedCats.chinaStimulus          = /china stimulus|pboc|china growth|chinese demand/.test(nt);
-    if (!mergedCats.growthFears)            mergedCats.growthFears            = /recession|demand destruction|demand collapse|global slowdown/.test(nt);
-  }
-
-  // ── Named catalyst booleans used in scoring below ──
-  const oilSupplyShock     = !!mergedCats.oilSupplyShock;
-  const oilSupplyUnwind    = !!mergedCats.oilSupplyUnwind;
-  const geopoliticalCrisis = !!mergedCats.geopoliticalEscalation;
-  const geopoliticalUnwind = !!mergedCats.geopoliticalDeEscalation;
-  const inflationFears     = !!mergedCats.inflationHot;
-  const fedPivot           = !!mergedCats.fedDovish;
-  const chinaStimulus      = !!mergedCats.chinaStimulus;
-  const catGrowthFears     = !!mergedCats.growthFears;
-  const iP = chinaStimulus;   // industrial demand positive
-  const iN = catGrowthFears;  // industrial demand negative
-  const ngBull = false; // NG neutral unless specific catalyst (extend later)
-  const ngBear = false;
-
-  // ── RAW econ direction — independent of regime flip ──
-  // Use the passed-in regime object (not module-level cache) to determine
-  // whether the econ signal was flipped. This ensures correctness even if
-  // the module cache differs from what was active when the analysis ran.
-  const econFlipped = regime && regime.econScoreFlip === true;
-  const econDataStrong = (econSig === "bull" && !econFlipped) ||
-    (econSig === "bear" && econFlipped);  // flipped bear = actually strong data
-  const econDataWeak   = (econSig === "bear" && !econFlipped) ||
-    (econSig === "bull" && econFlipped);  // flipped bull = actually weak data
-
-  // ── Market conditions — derived from RAW data direction + market signals ──
-  // When econ is neutral (no data released, e.g. Fed speech day), we infer
-  // dollar/yield conditions from premarket + news alone. Premarket bearish
-  // with news bearish on a prior strong data day = yields still elevated.
-
-  const econIsNeutral = !econDataStrong && !econDataWeak; // econ scored 0, no directional data
-
-  // Dollar: strong when underlying data is strong OR when prior strong data
-  // is still driving the narrative (inferred from news bearish on neutral econ day)
-  const dollarStrong = (econDataStrong && newsSig !== "bull") ||
-    (econIsNeutral && newsSig === "bear" && preSig === "bear"); // prior strong data echo
-  const dollarWeak   = (econDataWeak && !econIsNeutral) ||
-    (newsSig === "bull" && !econDataStrong && !econIsNeutral);
-
-  // Risk-off: driven purely by market price action
-  const riskOff = (newsSig === "bear") || (preSig === "bear");
-  const riskOn  = (newsSig === "bull") && (preSig !== "bear");
-
-  // Yields rising: strong data in restrictive regime = higher-for-longer pricing
-  // Also infer yields still elevated if econ neutral but both news + pre bearish
-  // (prior NFP beat is still driving yield narrative next session)
-  const yieldsRising  = (econDataStrong && newsSig === "bear") ||
-    (econIsNeutral && newsSig === "bear" && preSig === "bear");
-  const yieldsFalling = econDataWeak && newsSig === "bull";
-
-  // Asia weakness: premarket bear
-  const asiaWeak   = preSig === "bear";
-  const asiaStrong = preSig === "bull";
-
-  // Growth fears: premarket bear + news bear
-  const growthFears = (preSig === "bear") && (newsSig === "bear");
-
-  function sig(s) { return s > 0 ? "bull" : s < 0 ? "bear" : "neutral"; }
-
-  // ── EQUITIES ──
-  // Use regime-adjusted econ score (already flipped by GNISBN if applicable)
-  const esScore  = (econScore * 0.35) + (newsScore * 0.45) + (earnScore * 0.20);
-  const nqScore  = yieldsRising
-    ? Math.min(esScore - 0.15, newsScore * 0.6 + econScore * 0.25 + earnScore * 0.15)
-    : (econScore * 0.30) + (newsScore * 0.50) + (earnScore * 0.20);
-  const ymScore  = (econScore * 0.45) + (newsScore * 0.35) + (earnScore * 0.20);
-  const rtyScore = (econScore * 0.25) + (newsScore * 0.45) + (preScore * 0.10) + (earnScore * 0.20)
-                   + (yieldsRising ? -0.20 : 0);
-
-  const equityBias = { ES: sig(esScore), NQ: sig(nqScore), YM: sig(ymScore), RTY: sig(rtyScore) };
-
-  // ── METALS ──
-  // GC: geopolitical unwind is an explicit BEARISH catalyst — safe-haven premium fading
-  // De-escalation overrides the riskOff/riskOn macro logic for gold specifically
-  let gcBias;
-  if (geopoliticalUnwind && riskOn)                     gcBias = "bear";    // crisis over + risk-on = double pressure on gold
-  else if (geopoliticalUnwind && !riskOff)              gcBias = "bear";    // safe-haven bid unwinding
-  else if (geopoliticalUnwind && riskOff)               gcBias = "neutral"; // unwind but some risk-off remains — mixed
-  else if (geopoliticalCrisis && riskOff && !dollarStrong) gcBias = "bull"; // active crisis + no dollar headwind
-  else if (geopoliticalCrisis && dollarStrong && yieldsRising) gcBias = "neutral"; // crisis vs dollar/yields
-  else if (geopoliticalCrisis && dollarStrong)          gcBias = "neutral"; // competing forces
-  else if (inflationFears && !dollarStrong)             gcBias = "bull";    // inflation hedge
-  else if (fedPivot)                                    gcBias = "bull";    // dovish Fed
-  else if (dollarStrong && yieldsRising)                gcBias = "bear";    // yields + dollar dominate
-  else if (dollarStrong && riskOff)                     gcBias = "neutral"; // competing forces
-  else if (riskOff && !dollarStrong)                    gcBias = "bull";    // safe-haven bid
-  else if (dollarWeak || yieldsFalling)                 gcBias = "bull";    // dollar/yield tailwind
-  else if (riskOn && dollarStrong)                      gcBias = "bear";    // risk-on + strong dollar
-  else                                                  gcBias = "neutral";
-
-  // SI: follows GC direction + amplified by industrial demand
-  // Geopolitical unwind hurts silver more than gold (both precious AND industrial demand weakens)
-  let siBias;
-  if (geopoliticalUnwind && riskOn)                                     siBias = "bear";   // double headwind: safe-haven + industrial risk-on flows away
-  else if (gcBias === "bear")                                           siBias = "bear";
-  else if (gcBias === "bull" && iP)               siBias = "bull";
-  else if (gcBias === "bull" && !catGrowthFears && !iN) siBias = "bull";
-  else if (gcBias === "bull" && (catGrowthFears || iN)) siBias = "neutral";
-  else if (gcBias === "neutral" && (catGrowthFears || iN)) siBias = "bear";
-  else if (gcBias === "neutral" && iP)            siBias = "bull";
-  else                                                                  siBias = "neutral";
-
-  // HG: industrial/growth driven — China stimulus or global growth = bull
-  // Geopolitical risk is indirect for copper (demand matters more than supply)
-  let hgBias;
-  if (chinaStimulus || iP)   hgBias = "bull";    // direct demand catalyst
-  else if (catGrowthFears || asiaWeak)            hgBias = "bear";    // demand destruction
-  else if (riskOn && asiaStrong)               hgBias = "bull";
-  else                                         hgBias = "neutral";
-
-  // PL: 50% precious metals (GC direction), 50% industrial (HG direction)
-  // More industrial-sensitive than gold — automotive/industrial demand matters more for platinum
-  // Geopolitical crisis gives less safe-haven bid than gold
-  const plMetals = gcBias === "bull" ? 1 : gcBias === "bear" ? -1 : 0;
-  const plIndust = hgBias === "bull" ? 1 : hgBias === "bear" ? -1 : 0;
-  // Geopolitical crisis: reduce precious metal component for PL (less safe-haven than GC)
-  const plGeoAdj = (geopoliticalCrisis && gcBias === "bull") ? -0.2 : 0; // crisis inflates GC but not PL as much
-  const plScore  = (plMetals * 0.5) + (plIndust * 0.5) + plGeoAdj;
-  const plBias   = sig(plScore);
-
-  // ── ENERGIES ──
-  // CL: oil is geopolitically driven — escalation creates supply risk premium (bull)
-  // de-escalation removes it (bear). Both override macro signal.
-  // Active geopolitical escalation (Iran-Israel, OPEC threats) = supply risk = BULL
-  // even without confirmed supply disruption — the risk premium IS the trade.
-  const oilGeoRisk = oilSupplyShock || geopoliticalCrisis; // escalation OR confirmed shock
-  let clBias;
-  if (oilSupplyUnwind)                                clBias = "bear";    // premium fading = supply bid removed
-  else if (oilGeoRisk && !catGrowthFears)             clBias = "bull";    // geopolitical risk premium drives oil higher
-  else if (oilGeoRisk && catGrowthFears)              clBias = "neutral"; // supply risk vs demand destruction = mixed
-  else if (catGrowthFears || growthFears)             clBias = "bear";    // demand destruction with no supply catalyst
-  else if (riskOn && dollarWeak)                      clBias = "bull";    // risk-on + weak dollar
-  else if (riskOff && dollarStrong)                   clBias = "bear";    // macro bearish, no oil catalyst
-  else if (dollarStrong)                              clBias = "bear";
-  else if (riskOff)                                   clBias = "bear";
-  else                                                clBias = "neutral";
-
-  // NG: weather/storage driven — macro-independent unless specific NG catalyst detected
-  let ngBias;
-  if (ngBull)       ngBias = "bull";   // specific NG supply/demand catalyst
-  else if (ngBear)  ngBias = "bear";   // specific NG oversupply/mild weather
-  else              ngBias = "neutral"; // no NG-specific catalyst — default neutral
-
-  // ── DXY ──
-  // Based on RAW data strength + regime — not regime-adjusted econ signal
-  // Strong data = dollar bull (rate premium). Weak data = dollar bear.
-  // Geopolitical crisis + risk-off = dollar bull (flight to safety)
-  // But oil supply shock alone (without rate/data driver) = neutral for dollar
-  //   because oil inflation can both hurt and help dollar depending on context
-  let dxyBias;
-  if      (econDataStrong && riskOff)                                  dxyBias = "bull";     // strong data + safety bid
-  else if (econDataStrong)                                             dxyBias = "bull";     // rate premium drives dollar
-  else if (geopoliticalCrisis && riskOff && !econDataWeak)             dxyBias = "bull";     // flight to safety into USD during crisis
-  else if (econIsNeutral && newsSig === "bear" && preSig === "bear")   dxyBias = "bull";     // prior strong data echo
-  else if (econDataWeak && riskOn)                                     dxyBias = "bear";     // weak data + risk-on = dollar sold
-  else if (econDataWeak)                                               dxyBias = "bear";     // rate cut expectations
-  else if (econIsNeutral && newsSig === "bull" && preSig === "bull")   dxyBias = "bear";     // risk-on, no data support
-  else if (oilSupplyShock && !econDataStrong && !gC)   dxyBias = "neutral";  // oil shock without macro driver = mixed dollar signal
-  else if (riskOff)                                                    dxyBias = "neutral";  // safety bid but no clear direction
-  else                                                                 dxyBias = "neutral";
-
-  // ── BEST SETUP per group ──
-  // Pick clearest directional (not neutral) + aligns with overall bias signal
-  function pickBest(instruments, biases) {
-    // Prefer instruments that match overall direction, then strongest signal
-    const overall = overallWS < 0 ? "bear" : overallWS > 0 ? "bull" : null;
-    const directional = instruments.filter(t => biases[t] !== "neutral");
-    const aligned = directional.filter(t => !overall || biases[t] === overall);
-    const pool = aligned.length > 0 ? aligned : directional.length > 0 ? directional : instruments;
-    // Return first in pool — order of array = priority
-    return pool[0];
-  }
-
-  // NQ leads equities when yields are rising (most rate-sensitive)
-  // RTY leads only when growth/credit fears dominate without yield driver
-  const equityOrder = yieldsRising ? ["NQ","ES","YM","RTY"] : ["NQ","ES","RTY","YM"];
-  const equityBest = pickBest(equityOrder, equityBias);
-  const metalsBest = pickBest(["HG","GC","SI","PL"], { GC: gcBias, SI: siBias, HG: hgBias, PL: plBias });
-  const energyBest = pickBest(["CL","NG"], { CL: clBias, NG: ngBias });
-
-  function setupDir(b) { return b === "bull" ? "LONG" : b === "bear" ? "SHORT" : null; }
-  function diverges(b) { return overallWS < -0.15 ? b === "bull" : overallWS > 0.15 ? b === "bear" : false; }
-
-  return {
-    equities: {
-      ES:  { bias: equityBias.ES,  bestSetup: equityBest==="ES",  setupDirection: equityBest==="ES"  ? setupDir(equityBias.ES)  : null, divergence: diverges(equityBias.ES)  },
-      NQ:  { bias: equityBias.NQ,  bestSetup: equityBest==="NQ",  setupDirection: equityBest==="NQ"  ? setupDir(equityBias.NQ)  : null, divergence: diverges(equityBias.NQ)  },
-      YM:  { bias: equityBias.YM,  bestSetup: equityBest==="YM",  setupDirection: equityBest==="YM"  ? setupDir(equityBias.YM)  : null, divergence: diverges(equityBias.YM)  },
-      RTY: { bias: equityBias.RTY, bestSetup: equityBest==="RTY", setupDirection: equityBest==="RTY" ? setupDir(equityBias.RTY) : null, divergence: diverges(equityBias.RTY) },
-    },
-    metals: {
-      GC: { bias: gcBias, bestSetup: metalsBest==="GC", setupDirection: metalsBest==="GC" ? setupDir(gcBias) : null, divergence: diverges(gcBias) },
-      SI: { bias: siBias, bestSetup: metalsBest==="SI", setupDirection: metalsBest==="SI" ? setupDir(siBias) : null, divergence: diverges(siBias) },
-      HG: { bias: hgBias, bestSetup: metalsBest==="HG", setupDirection: metalsBest==="HG" ? setupDir(hgBias) : null, divergence: diverges(hgBias) },
-      PL: { bias: plBias, bestSetup: metalsBest==="PL", setupDirection: metalsBest==="PL" ? setupDir(plBias) : null, divergence: diverges(plBias) },
-    },
-    energies: {
-      CL: { bias: clBias, bestSetup: energyBest==="CL", setupDirection: energyBest==="CL" ? setupDir(clBias) : null, divergence: diverges(clBias) },
-      NG: { bias: ngBias, bestSetup: energyBest==="NG", setupDirection: energyBest==="NG" ? setupDir(ngBias) : null, divergence: diverges(ngBias) },
-    },
-    dxy: {
-      DXY: { bias: dxyBias, bestSetup: true, setupDirection: setupDir(dxyBias), divergence: false },
-    }
-  };
-}
+  "You are a senior futures trader with deep knowledge of how macro conditions, geopolitical events, and market catalysts affect specific instruments.",
+  "You have been given today's full morning brief. Your job is to:",
+  "1. Score each instrument's directional bias (bull/bear/neutral) based on TODAY's specific drivers",
+  "2. Write ONE concise implication sentence explaining the dominant catalyst for each instrument",
+  "3. Identify the 1-2 highest probability trade setups across ALL instruments",
+  "",
+  "INSTRUMENTS: ES (S&P 500), NQ (Nasdaq 100), YM (Dow Jones), RTY (Russell 2000), GC (Gold), SI (Silver), HG (Copper), PL (Platinum), CL (Crude Oil), NG (Natural Gas), DXY (US Dollar Index)",
+  "",
+  "SCORING RULES:",
+  "- Score based on the DOMINANT catalyst for each instrument specifically — not the overall market bias",
+  "- Different instruments can have opposite biases on the same day (e.g. CL bull while equities bear)",
+  "- Geopolitical escalation: GC bull (safe-haven), CL bull (supply risk), equities bear, DXY bull",
+  "- Geopolitical de-escalation or deal signals: GC bear (safe-haven unwind), CL bear (supply risk fading), equities bull",
+  "- Fed hawkish / higher-for-longer: NQ most bearish (rate sensitive), DXY bull, GC headwind",
+  "- Fed dovish / rate cut signal: NQ bull, DXY bear, GC bull",
+  "- Strong jobs/inflation data under GNISBN regime: equities bear (bad news is bad), DXY bull",
+  "- China stimulus: HG bull, risk-on equities bull",
+  "- Growth fears / recession: HG bear, CL bear, RTY most bearish",
+  "- NG is ONLY affected by weather, storage reports, LNG demand — not macro or geopolitics. Default neutral unless specific NG catalyst exists.",
+  "",
+  "BEST SETUP RULES:",
+  "- Only flag as best setup when there is HIGH CONVICTION — multiple signals align, clear catalyst, instrument is most sensitive to today's dominant theme",
+  "- Prefer the instrument MOST sensitive to the dominant catalyst (e.g. NQ over ES when yields are the driver)",
+  "- Can have 0, 1, or 2 best setups — do not force one if conviction is low",
+  "- Direction: 'long' or 'short'",
+  "",
+  "CRITICAL: Reply ONLY with raw JSON, no markdown, no backticks.",
+  "SCHEMA: {",
+  "  \"equities\": {",
+  "    \"ES\": {\"bias\":\"bull|bear|neutral\", \"implication\":\"ONE sentence\"},",
+  "    \"NQ\": {\"bias\":\"bull|bear|neutral\", \"implication\":\"ONE sentence\"},",
+  "    \"YM\": {\"bias\":\"bull|bear|neutral\", \"implication\":\"ONE sentence\"},",
+  "    \"RTY\": {\"bias\":\"bull|bear|neutral\", \"implication\":\"ONE sentence\"}",
+  "  },",
+  "  \"metals\": {",
+  "    \"GC\": {\"bias\":\"bull|bear|neutral\", \"implication\":\"ONE sentence\"},",
+  "    \"SI\": {\"bias\":\"bull|bear|neutral\", \"implication\":\"ONE sentence\"},",
+  "    \"HG\": {\"bias\":\"bull|bear|neutral\", \"implication\":\"ONE sentence\"},",
+  "    \"PL\": {\"bias\":\"bull|bear|neutral\", \"implication\":\"ONE sentence\"}",
+  "  },",
+  "  \"energies\": {",
+  "    \"CL\": {\"bias\":\"bull|bear|neutral\", \"implication\":\"ONE sentence\"},",
+  "    \"NG\": {\"bias\":\"bull|bear|neutral\", \"implication\":\"ONE sentence\"}",
+  "  },",
+  "  \"dxy\": {",
+  "    \"DXY\": {\"bias\":\"bull|bear|neutral\", \"implication\":\"ONE sentence\"}",
+  "  },",
+  "  \"bestSetups\": [",
+  "    {\"ticker\":\"NQ\", \"direction\":\"short\", \"reason\":\"ONE sentence on why this is the highest conviction setup today\"}",
+  "  ]",
+  "}"
+].join("\n");
 
 app.post("/api/markets", async function(req, res) {
   const { econ, earn, premarket, news, metaScore, regime } = req.body;
@@ -1466,33 +1260,49 @@ app.post("/api/markets", async function(req, res) {
 
   try {
     const today = new Date().toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
-    const etTime = new Date().toLocaleTimeString("en-US", { hour:"2-digit", minute:"2-digit", hour12:true, timeZone:"America/New_York" });
+    const etNow = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
+    const etTime = etNow.toLocaleTimeString("en-US", { hour:"2-digit", minute:"2-digit", hour12:true });
+    const etHour = etNow.getHours(); const etMin = etNow.getMinutes(); const etDay = etNow.getDay();
+    const sessionOpen = etDay >= 1 && etDay <= 5 && (etHour > 9 || (etHour === 9 && etMin >= 30));
+    const sessionStatus = sessionOpen ? "US SESSION OPEN (pre-market data is informational only)" : "PRE-MARKET (overnight data is active signal)";
+
+    const activeRegime = regime || regimeCache;
+    const regimeName = activeRegime ? activeRegime.regime : "Unknown";
+    const regimeDesc = {
+      "GNISBN": "Good News Is Bad News — strong data = delayed cuts = bearish for equities",
+      "GNISGN": "Good News Is Good News — strong data = growth = bullish for equities",
+      "BNISBN": "Bad News Is Bad News — weak data = recession fears = bearish",
+      "BNISGNBN": "Bad News Is Good News — weak data = rate cuts coming = bullish"
+    }[regimeName] || "Unknown regime";
+
+    // Build catalyst context from Claude's structured flags
+    const newsCats = (news && news.catalysts) || {};
+    const econCats = (econ && econ.catalysts) || {};
+    const cats = {};
+    [...Object.keys(newsCats), ...Object.keys(econCats)].forEach(k => {
+      cats[k] = !!(newsCats[k] || econCats[k]);
+    });
+    const activeCatalysts = Object.keys(cats).filter(k => cats[k]);
 
     const context = [
-      "TODAY: " + today + " TIME (ET): " + etTime,
+      "DATE: " + today + " | TIME: " + etTime + " ET | " + sessionStatus,
+      "REGIME: " + regimeName + " — " + regimeDesc,
+      "OVERALL BIAS: " + (metaScore ? metaScore.biasLabel + " (" + metaScore.weightedScore + ")" : "Unknown"),
+      "AI RATIONALE: " + (metaScore ? metaScore.rationale : ""),
+      activeCatalysts.length > 0 ? "ACTIVE CATALYSTS: " + activeCatalysts.join(", ") : "NO SPECIFIC CATALYSTS FLAGGED",
       "",
-      "OVERALL BIAS: " + (metaScore ? metaScore.biasLabel + " (weighted score: " + metaScore.weightedScore + ")" : "Unknown"),
-      "RATIONALE: " + (metaScore ? metaScore.rationale : "N/A"),
-      "",
-      "ECON: signal=" + (econ ? econ.signal : "neutral") + ", score=" + (econ ? econ.score : 0) + ", weight=" + (metaScore && metaScore.weights ? metaScore.weights.econ : 3),
-      "Summary: " + (econ ? econ.summary : "No data"),
-      "",
-      "EARNINGS: signal=" + (earn ? earn.signal : "neutral") + ", score=" + (earn ? earn.score : 0) + ", weight=" + (metaScore && metaScore.weights ? metaScore.weights.earn : 2),
-      "Summary: " + (earn ? earn.summary : "No data"),
-      "",
-      "PRE-MARKET: signal=" + (premarket ? premarket.signal : "neutral") + ", score=" + (premarket ? premarket.score : 0) + ", weight=" + (metaScore && metaScore.weights ? metaScore.weights.premarket : 1),
-      "Summary: " + (premarket ? premarket.summary : "No data"),
-      "",
-      "MARKET NEWS: signal=" + (news ? news.signal : "neutral") + ", score=" + (news ? news.score : 0) + ", weight=" + (metaScore && metaScore.weights ? metaScore.weights.news : 2),
-      "Summary: " + (news ? news.summary : "No data"),
+      "ECON [" + (econ ? econ.signal.toUpperCase() : "NEUTRAL") + ", weight " + (metaScore && metaScore.weights ? metaScore.weights.econ : 1) + "x]: " + (econ ? econ.summary : "No data"),
+      "EARNINGS [" + (earn ? earn.signal.toUpperCase() : "NEUTRAL") + ", weight " + (metaScore && metaScore.weights ? metaScore.weights.earn : 1) + "x]: " + (earn ? earn.summary : "No data"),
+      "PRE-MARKET [" + (premarket ? premarket.signal.toUpperCase() : "NEUTRAL") + (sessionOpen ? " — ZEROED AFTER OPEN" : "") + "]: " + (premarket ? premarket.summary : "No data"),
+      "NEWS [" + (news ? news.signal.toUpperCase() : "NEUTRAL") + ", weight " + (metaScore && metaScore.weights ? metaScore.weights.news : 2) + "x]: " + (news ? news.summary : "No data"),
     ].join("\n");
 
     const body = {
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 1200,
+      model: "claude-sonnet-4-6",
+      max_tokens: 1500,
       temperature: 0,
-      system: "You are a futures trader market implications engine. CRITICAL: Reply ONLY with raw JSON matching the exact schema requested. No markdown, no backticks, no explanation.",
-      messages: [{ role: "user", content: MARKETS_PROMPT + "\n\nDATA:\n" + context }]
+      system: "You are a senior futures trader scoring instrument biases for a day-trading dashboard. You understand market microstructure, how different instruments react to macro/geopolitical events, and the difference between what matters for the session vs structural backdrop. CRITICAL: Reply ONLY with raw JSON matching the exact schema. No markdown, no backticks, no explanation outside the JSON.",
+      messages: [{ role: "user", content: MARKETS_PROMPT + "\n\nMORNING BRIEF:\n" + context }]
     };
 
     const payload = JSON.stringify(body);
@@ -1513,57 +1323,65 @@ app.post("/api/markets", async function(req, res) {
             const parsed = JSON.parse(raw);
             if (parsed.error) return reject(new Error(parsed.error.message));
             const text = (parsed.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
-            const cleaned = text.replace(/```json|```/g, "").trim();
+            const jsonMatch = text.match(/\{[\s\S]*\}/);
+            const cleaned = jsonMatch ? jsonMatch[0] : text.replace(/```json|```/g, "").trim();
             resolve(JSON.parse(cleaned));
           } catch(e) { reject(new Error("Parse error: " + e.message)); }
         });
       });
       req2.on("error", reject);
+      req2.setTimeout(45000, () => { req2.destroy(); reject(new Error("Markets timeout")); });
       req2.write(payload);
       req2.end();
     });
 
-    // ── Merge Claude's text with server-side deterministic scores ──
-    const activeRegime = regime || regimeCache; // prefer frontend-sent regime, fall back to server cache
-    // Determine if US session is open — premarket signal should not drive commodity scoring after open
-    const etNowSI = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
-    const etHourSI = etNowSI.getHours(); const etMinSI = etNowSI.getMinutes(); const etDaySI = etNowSI.getDay();
-    const sessionOpenSI = etDaySI >= 1 && etDaySI <= 5 && (etHourSI > 9 || (etHourSI === 9 && etMinSI >= 30));
-    const scores = scoreInstruments(econ, earn, premarket, news, metaScore, activeRegime, sessionOpenSI);
+    // ── Build final markets structure ──
+    // Claude now owns bias + implication. We handle best setup display.
+    const GROUPS = {
+      equities: ["ES","NQ","YM","RTY"],
+      metals:   ["GC","SI","HG","PL"],
+      energies: ["CL","NG"],
+      dxy:      ["DXY"]
+    };
 
-    function merge(claudeGroup, scoreGroup) {
+    // Extract best setups from Claude's response
+    const bestSetups = result.bestSetups || [];
+    const bestTickers = bestSetups.map(s => s.ticker);
+
+    function buildGroup(groupName) {
       const out = {};
-      Object.keys(scoreGroup).forEach(ticker => {
-        const c = (claudeGroup && claudeGroup[ticker]) ? claudeGroup[ticker] : {};
-        const s = scoreGroup[ticker];
+      GROUPS[groupName].forEach(ticker => {
+        const claudeData = (result[groupName] && result[groupName][ticker]) || {};
+        const bias = (claudeData.bias || "neutral").toLowerCase();
+        const isBest = bestTickers.includes(ticker);
+        const setup = bestSetups.find(s => s.ticker === ticker);
         out[ticker] = {
-          bias:           s.bias,
-          implication:    c.implication || "No implication data.",
-          divergence:     s.divergence,
-          bestSetup:      s.bestSetup,
-          setupDirection: s.setupDirection
+          bias,
+          implication: claudeData.implication || "No data.",
+          bestSetup: isBest,
+          setupDirection: isBest ? (setup ? setup.direction : (bias === "bull" ? "long" : "short")) : null,
+          divergence: false
         };
       });
       return out;
     }
 
     const finalMarkets = {
-      equities: merge(result.equities, scores.equities),
-      metals:   merge(result.metals,   scores.metals),
-      energies: merge(result.energies, scores.energies),
-      dxy:      merge(result.dxy,      scores.dxy)
+      equities: buildGroup("equities"),
+      metals:   buildGroup("metals"),
+      energies: buildGroup("energies"),
+      dxy:      buildGroup("dxy")
     };
 
-    console.log("Markets result generated:", JSON.stringify(Object.keys(finalMarkets)), "keys");
-    console.log("Markets equities:", finalMarkets.equities ? Object.keys(finalMarkets.equities).join(",") : "null");
+    console.log("Markets result generated (Claude-driven scoring)");
+    console.log("Best setups:", bestSetups.map(s => s.ticker + " " + s.direction).join(", "));
     res.json(finalMarkets);
   } catch(e) {
     console.error("Markets error:", e.message);
-    console.error("Markets stack:", e.stack ? e.stack.slice(0,500) : "no stack");
+    console.error("Markets stack:", e.stack ? e.stack.slice(0,400) : "no stack");
     res.status(500).json({ error: e.message });
   }
 });
-
 
 // ── Summary endpoint ──────────────────────────────────────────
 // Generates a plain-English layman's summary of the full dashboard
@@ -2057,16 +1875,57 @@ async function runBacktestJob(jobId, date) {
     } catch(e) { console.error("Job meta error:", e.message); }
 
     updateJob("Meta-score complete. Scoring markets...", 3);
-    const marketScores = scoreInstruments(results.econ, results.earn, results.premarket, results.news, metaScore, null, false); // backtest — no session-open zeroing
 
-    // ── Round 3: summary ──
-    updateJob("Generating plain-English summary...", 4);
-    // Build best setups list for backtest summary
-    const btNameMap = {ES:"ES (S&P 500)",NQ:"NQ (Nasdaq 100)",YM:"YM (Dow Jones)",RTY:"RTY (Russell 2000)",GC:"GC (Gold)",SI:"SI (Silver)",HG:"HG (Copper)",PL:"PL (Platinum)",CL:"CL (Crude Oil)",NG:"NG (Natural Gas)",DXY:"DXY (US Dollar Index)"};
-    const btSetups = [];
-    [marketScores.equities, marketScores.metals, marketScores.energies, marketScores.dxy].forEach(function(g) {
-      if (!g) return;
-      Object.keys(g).forEach(function(t) { if(g[t]&&g[t].bestSetup&&g[t].setupDirection) btSetups.push((btNameMap[t]||t)+": "+g[t].setupDirection+" ("+g[t].bias+")"); });
+    // ── Use MARKETS_PROMPT with Claude for backtest instrument scoring ──
+    let marketScores = { equities:{ES:{bias:"neutral",implication:""},NQ:{bias:"neutral",implication:""},YM:{bias:"neutral",implication:""},RTY:{bias:"neutral",implication:""}}, metals:{GC:{bias:"neutral",implication:""},SI:{bias:"neutral",implication:""},HG:{bias:"neutral",implication:""},PL:{bias:"neutral",implication:""}}, energies:{CL:{bias:"neutral",implication:""},NG:{bias:"neutral",implication:""}}, dxy:{DXY:{bias:"neutral",implication:""}} };
+    try {
+      const btMktCtx = ["BACKTEST DATE: " + date, "REGIME: Unknown for this date — use your knowledge",
+        "OVERALL BIAS: " + metaScore.biasLabel,
+        "ECON: " + results.econ.signal.toUpperCase() + " | " + results.econ.summary,
+        "EARNINGS: " + results.earn.signal.toUpperCase() + " | " + results.earn.summary,
+        "PRE-MARKET: " + results.premarket.signal.toUpperCase() + " | " + results.premarket.summary,
+        "NEWS: " + results.news.signal.toUpperCase() + " | " + results.news.summary,
+        "NO ACTIVE CATALYSTS FLAGGED — use context from summaries above"
+      ].join("\n");
+      const btMktBody = { model:"claude-haiku-4-5-20251001", max_tokens:1500, temperature:0,
+        system:"You are a senior futures trader scoring instrument biases. CRITICAL: Reply ONLY with raw JSON matching the exact schema. No markdown.",
+        messages:[{ role:"user", content: MARKETS_PROMPT + "\n\nMORNING BRIEF:\n" + btMktCtx }] };
+      const btMktPayload = JSON.stringify(btMktBody);
+      const btMktHeaders = { "Content-Type":"application/json","Content-Length":Buffer.byteLength(btMktPayload),"x-api-key":process.env.ANTHROPIC_API_KEY,"anthropic-version":"2023-06-01" };
+      const btMktRaw = await new Promise((resolve, reject) => {
+        const opts = { hostname:"api.anthropic.com", path:"/v1/messages", method:"POST", headers:btMktHeaders };
+        const r2 = https.request(opts, r => { let d=""; r.on("data",c=>d+=c); r.on("end",()=>resolve(d)); });
+        r2.on("error", reject);
+        r2.setTimeout(30000, ()=>{ r2.destroy(); reject(new Error("BT markets timeout")); });
+        r2.write(btMktPayload); r2.end();
+      });
+      const btMktParsed = JSON.parse(btMktRaw);
+      const btMktText = (btMktParsed.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("").trim();
+      const btMktResult = JSON.parse(btMktText.replace(/```json|```/g,"").trim());
+      const GROUPS = { equities:["ES","NQ","YM","RTY"], metals:["GC","SI","HG","PL"], energies:["CL","NG"], dxy:["DXY"] };
+      const btBestSetups = btMktResult.bestSetups || [];
+      const btBestTickers = btBestSetups.map(s=>s.ticker);
+      Object.keys(GROUPS).forEach(grp => {
+        marketScores[grp] = {};
+        GROUPS[grp].forEach(ticker => {
+          const cd = (btMktResult[grp] && btMktResult[grp][ticker]) || {};
+          const bias = (cd.bias||"neutral").toLowerCase();
+          const isBest = btBestTickers.includes(ticker);
+          const setup = btBestSetups.find(s=>s.ticker===ticker);
+          marketScores[grp][ticker] = { bias, implication:cd.implication||"", bestSetup:isBest, setupDirection:isBest?(setup?setup.direction:(bias==="bull"?"long":"short")):null };
+        });
+      });
+    } catch(e) { console.error("BT market scoring error:", e.message); }
+
+    updateJob("Markets scored. Generating summary...", 4);
+
+    // Build best setups for summary context
+    const btSetupsList = [];
+    Object.keys(marketScores).forEach(grp => {
+      Object.keys(marketScores[grp]).forEach(t => {
+        const inst = marketScores[grp][t];
+        if (inst && inst.bestSetup && inst.setupDirection) btSetupsList.push(t+": "+inst.setupDirection+" ("+inst.bias+")");
+      });
     });
     const sumCtx = ["BACKTEST DATE: " + date, "OVERALL BIAS: " + metaScore.biasLabel, "RATIONALE: " + metaScore.rationale,
       "ECON: " + results.econ.signal.toUpperCase() + " | " + results.econ.summary,
@@ -2075,7 +1934,7 @@ async function runBacktestJob(jobId, date) {
       "NEWS: " + results.news.signal.toUpperCase() + " | " + results.news.summary,
       "Equities: ES="+marketScores.equities.ES.bias+", NQ="+marketScores.equities.NQ.bias,
       "DXY: "+marketScores.dxy.DXY.bias,
-      "HIGHEST PROBABILITY SETUPS: " + (btSetups.length > 0 ? btSetups.join(", ") : "None identified")
+      "HIGHEST PROBABILITY SETUPS: " + (btSetupsList.length > 0 ? btSetupsList.join(", ") : "None identified")
     ].join("\n");
     const sumBody = { model:"claude-haiku-4-5-20251001", max_tokens:800, temperature:0,
       system:"You are a clear, friendly market commentator. CRITICAL: Reply ONLY with raw JSON, no markdown. This is a historical backtest for " + date + " — write in past tense. Each paragraph must be 2-3 sentences maximum.",
