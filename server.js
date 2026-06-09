@@ -315,15 +315,17 @@ async function fetchPremarket() {
     return null; // null triggers web search fallback in the analyze endpoint
   }
 
-  // Monday before US market open (9:30am ET) — ETF proxies don't reflect overnight moves
-  // Asian markets closed hours ago, European markets are open but ETFs don't trade yet
-  // Use web search for real overnight data through the full pre-market window
-  if (dayOfWeek === 1 && hourET < 10) {
-    console.log("Premarket: Monday pre-open (" + hourET + "h ET) — using web search for overnight data");
+  // Any weekday before 9:30am ET — ETF proxies don't trade yet so they return stale data
+  // Asian markets have already closed, European markets are open but US ETFs haven't opened
+  // Use web search for real overnight data on ALL weekday pre-market windows
+  const isWeekdayPreOpen = dayOfWeek >= 1 && dayOfWeek <= 5 &&
+    (hourET < 9 || (hourET === 9 && minuteET < 30));
+  if (isWeekdayPreOpen) {
+    console.log("Premarket: weekday pre-open (" + hourET + ":" + String(minuteET).padStart(2,"0") + " ET) — using web search for live data");
     return null; // null triggers web search fallback
   }
 
-  // ETF proxies for international indices (free tier compatible)
+  // ETF proxies for international indices (US session only — after 9:30am ET)
   const symbols = [
     // Asia ETF proxies
     { symbol: "EWH",  label: "HSI (Hang Seng)",       region: "asia" },
@@ -764,12 +766,12 @@ const EARN_PROMPT = [
 
 const PREMARKET_PROMPT = [
   "From this data, score pre-market sentiment for US index futures (NQ/ES) using this exact methodology:",
-  "ASIA SCORE: Evaluate these 5 indices individually — HSI (Hang Seng), Nikkei 225, ASX 200, Shanghai Composite, STI (Straits Times). For each: up = bullish, down = bearish, flat/missing = neutral. If 3 or more are bullish, Asia = bullish. If 3 or more are bearish, Asia = bearish. Otherwise Asia = neutral.",
-  "EUROPE SCORE: Evaluate these 5 indices individually — STOXX 600, DAX, FTSE 100, AEX, CAC 40. Apply the same majority rule: 3+ bullish = Europe bullish, 3+ bearish = Europe bearish, otherwise neutral.",
-  "US FUTURES: Note direction of NQ, ES, DOW/YM if visible. Use as tiebreaker only — do not let US futures override the Asia/Europe majority vote.",
-  "FINAL SIGNAL: If both Asia and Europe are bullish = bull. If both are bearish = bear. If they disagree or one is neutral = neutral. US futures break the tie if Asia and Europe split.",
-  "MAX SCORE RULE: Pre-market is a supporting indicator only. Hard cap score at +1 (bull) or -1 (bear). Never return a score outside the range of -1 to +1.",
-  "SUMMARY RULE: Your summary must state (1) Asia verdict with the specific indices that drove it, (2) Europe verdict with the specific indices that drove it, (3) US futures direction. Two sentences max.",
+  "ASIA SCORE: Evaluate these 5 indices — HSI (Hang Seng), Nikkei 225, ASX 200, Shanghai Composite, STI. Majority rule: 3+ bullish = Asia bullish, 3+ bearish = Asia bearish, otherwise neutral.",
+  "EUROPE SCORE: Evaluate these 5 indices — STOXX 600, DAX, FTSE 100, AEX, CAC 40. Same majority rule.",
+  "US FUTURES: NQ, ES, YM direction if available — use as primary tiebreaker.",
+  "WEIGHTING RULE: Europe carries MORE weight than Asia for US open direction because European markets close closer to the US open (11:30am ET) and have higher intraday correlation to ES/NQ. Apply this priority: (1) If US futures direction is available, it wins outright. (2) If Europe and Asia disagree, EUROPE wins — score based on Europe's signal. (3) Only use pure Asia signal if Europe data is unavailable.",
+  "FINAL SIGNAL EXAMPLES: Asia neutral + Europe bullish = BULL. Asia bearish + Europe bullish = BULL (Europe wins). Asia bullish + Europe neutral = BULL. Asia bearish + Europe bearish = BEAR. All neutral = NEUTRAL.",
+  "SUMMARY RULE: State (1) Asia verdict with key indices, (2) Europe verdict with key indices, (3) US futures if available. Two sentences max.",
   "Score: bull=1, bear=-1, neutral=0.",
   "JSON SCHEMA: {\"signal\":\"bull|bear|neutral\",\"summary\":\"2 sentence summary\",\"score\":1,\"guidance\":null}"
 ].join(" ");
@@ -956,14 +958,14 @@ app.post("/api/analyze", async function(req, res) {
           let searchCtx = "";
           if (dayET === 0 && hourET2 >= 17) {
             searchCtx = " It is Sunday evening ET — Asian markets are opening or in early session. Search for LIVE current performance of: HSI (Hang Seng), Nikkei 225, ASX 200 (Australia), Shanghai Composite, STI (Singapore). State current % change for each. Also check if US index futures (NQ, ES) are showing any direction in overnight trading.";
-          } else if (dayET === 1 && hourET2 < 10) {
-            // Monday pre-open — covers 12am-9:30am ET window
+          } else if (dayET >= 1 && dayET <= 5 && (hourET2 < 9 || (hourET2 === 9 && etNow2.getMinutes() < 30))) {
+            // Any weekday pre-open — Tue-Sun before 9:30am ET
             if (hourET2 < 3) {
-              searchCtx = " It is early Monday morning ET — Asian markets are trading, European markets not yet open (~3am ET open). Search for LIVE overnight performance of: HSI, Nikkei 225, ASX 200, Shanghai Composite, STI. State current % change for each.";
+              searchCtx = " It is early morning ET — Asian markets are trading, European markets not yet open (~3am ET open). Search for LIVE overnight performance of: HSI (Hang Seng), Nikkei 225, ASX 200 (Australia), Shanghai Composite, STI (Singapore). State current % change for each.";
             } else if (hourET2 < 9) {
-              searchCtx = " It is Monday morning ET, European markets are now open. Search for current performance of: HSI (final close), Nikkei (final close), ASX 200 (final close), Shanghai (final close), STI (final close). Also STOXX 600, DAX, FTSE 100, AEX, CAC 40 current levels. US futures (NQ, ES) pre-market direction.";
+              searchCtx = " It is morning ET. Asian markets have closed, European markets are now open. Search for: HSI final close, Nikkei final close, ASX 200 final close, Shanghai final close, STI final close. Also STOXX 600, DAX, FTSE 100, AEX, CAC 40 current levels. US futures (NQ, ES) pre-market direction if available.";
             } else {
-              searchCtx = " It is Monday pre-market ET (after 9am). Asian markets have closed, European markets are trading. Search for: Asia final closes (HSI, Nikkei, ASX, Shanghai, STI), Europe current levels (STOXX 600, DAX, FTSE, AEX, CAC), and US futures (NQ, ES) pre-market direction right now.";
+              searchCtx = " It is pre-market ET (after 9am, before US open). Asian markets have closed, European markets are trading. Search for: Asia final closes (HSI, Nikkei, ASX, Shanghai, STI with % change), Europe current levels (STOXX 600, DAX, FTSE 100, AEX, CAC 40 with % change), and US futures (NQ, ES, YM) pre-market direction right now.";
             }
           } else {
             searchCtx = " Search the web for today " + todayStr2 + " pre-market performance of: HSI (Hang Seng), Nikkei 225, ASX 200, Shanghai Composite, STI. Also STOXX 600, DAX, FTSE 100, AEX, CAC 40. Also NQ futures, ES futures, DOW futures. State % change for each.";
