@@ -1250,6 +1250,8 @@ const MARKETS_PROMPT = [
   "- Can have 0, 1, or 2 best setups — do not force one if conviction is low",
   "- Direction: 'long' or 'short'",
   "",
+  "IMPLICATION LANGUAGE RULE: Use cautious, forward-looking language in all implication sentences. Say 'may face selling pressure', 'could benefit from', 'faces headwinds from', 'likely to see support', 'at risk of', 'positioned to'. Avoid definitive 'is driving' or 'is causing' language — these are bias assessments, not confirmed outcomes.",
+  "",
   "CRITICAL: Reply ONLY with raw JSON, no markdown, no backticks.",
   "SCHEMA: {",
   "  \"equities\": {",
