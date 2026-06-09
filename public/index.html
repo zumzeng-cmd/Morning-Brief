@@ -992,8 +992,24 @@ async function runAll(){
   // ── Hard reset ALL data before new analysis ──
   lastResults={}; lastMetaScore=null; lastMarketResults=null; lastSummaryData=null;
   overrides={econ:null,earn:null,premarket:null,news:null};
+  scores={econ:0,earn:0,premarket:0,news:0};
+  WEIGHTS={econ:1,earn:1,premarket:1,news:1};
   // Reset override buttons
   document.querySelectorAll('.obtn').forEach(function(b){ b.className='obtn'; });
+  // Reset card pts and signals
+  ['econ','earn','premarket','news'].forEach(function(k){
+    var ptsEl=document.getElementById('pts-'+k);
+    if(ptsEl){ ptsEl.textContent='0.0'; ptsEl.className='card-pts pts-neu'; }
+    var sigEl=document.getElementById('sig-'+k);
+    if(sigEl){ sigEl.textContent='NEUTRAL'; sigEl.className='card-sig sig-neutral'; sigEl.style.color=''; sigEl.style.background=''; }
+    var wtEl=document.getElementById('wt-'+k);
+    if(wtEl) wtEl.textContent='Weight: —';
+    var cardEl=document.getElementById('card-'+k);
+    if(cardEl) cardEl.className='card';
+    // Remove AT OPEN badge if present
+    var badge=document.querySelector('#pts-'+k+' ~ .at-open-badge') || (ptsEl&&ptsEl.parentElement?ptsEl.parentElement.querySelector('.at-open-badge'):null);
+    if(badge) badge.remove();
+  });
   // Reset bias banner
   document.getElementById('biasValue').textContent='ANALYZING...';
   document.getElementById('biasValue').style.color='var(--muted)';
