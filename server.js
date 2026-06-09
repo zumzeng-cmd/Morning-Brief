@@ -987,7 +987,19 @@ app.post("/api/analyze", async function(req, res) {
         rawData = cnbcData || "NO CNBC DATA";
         useSearch = true;
         const todayNewsStr = new Date().toLocaleDateString("en-US", { weekday:"long", month:"long", day:"numeric", year:"numeric" });
-        prompt = NEWS_PROMPT + " IMPORTANT: The CNBC page data above may be incomplete or delayed. Use web search to supplement — search for 'market moving news today " + todayNewsStr + "' to find any breaking developments (geopolitical statements, Fed comments, economic surprises, corporate news) that may not appear in the CNBC data. Prioritize the FRESHEST and most market-moving stories from EITHER source.";
+        // Append upcoming week events to give Claude forward context
+        let weekCtx = "";
+        try {
+          const wData = await fetchWeekAhead();
+          if (wData) {
+            const upcoming = wData.econ.filter(e => e.status === "scheduled" && e.tier === 1).slice(0,3).map(e => e.name + " (" + e.date + ")").join(", ");
+            const upEarn = wData.earnings.filter(e => e.status === "scheduled").slice(0,4).map(e => e.ticker + " " + e.when + " (" + e.date + ")").join(", ");
+            if (upcoming || upEarn) {
+              weekCtx = " UPCOMING THIS WEEK: Econ: " + (upcoming||"none") + ". Earnings: " + (upEarn||"none") + ". Mention these if they are relevant to today's market positioning.";
+            }
+          }
+        } catch(we) {}
+        prompt = NEWS_PROMPT + " IMPORTANT: The CNBC page data above may be incomplete or delayed. Use web search to supplement — search for 'market moving news today " + todayNewsStr + "' to find any breaking developments (geopolitical statements, Fed comments, economic surprises, corporate news) that may not appear in the CNBC data. Prioritize the FRESHEST and most market-moving stories from EITHER source." + weekCtx;
         console.log("News: using CNBC scrape + web search supplement");
       }
     } else {
@@ -2168,6 +2180,137 @@ app.get("/api/market-prices", async function(req, res) {
     res.json({ prices, timestamp: new Date().toISOString(), cached: false });
   } catch(e) {
     console.error("Market prices error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+
+// ── Week Ahead endpoint ───────────────────────────────────────
+// Fetches this week's key econ events and earnings, cached for 1 hour
+const MEGA_CAPS = ["NVDA","AAPL","MSFT","META","GOOGL","GOOG","AMZN","TSLA","AVGO","NFLX","AMD","QCOM","ARM","SMCI","ORCL","CRM","SHOP","UBER","INTC","MU"];
+const LARGE_CAPS = ["JPM","GS","BAC","MS","C","WFC","BLK","V","MA","PYPL","XOM","CVX","COP","OXY","LLY","UNH","JNJ","PFE","ABBV","MRK","COST","WMT","TGT","HD","NKE","SBUX","DIS","NFLX","T","VZ"];
+const WATCH_TICKERS = new Set([...MEGA_CAPS, ...LARGE_CAPS]);
+
+const TIER1_ECON = ["nonfarm","payroll","consumer price index","cpi","personal consumption expenditure","pce","fomc","federal open market","fed rate","interest rate decision","gross domestic product","gdp"];
+const TIER2_ECON = ["jobless claims","initial claims","jolts","adp employment","unemployment rate","average hourly","producer price","ppi","ism manufacturing","ism services","retail sales","industrial production"];
+
+var weekAheadCache = { data: null, fetchedAt: 0, weekKey: null };
+
+async function fetchWeekAhead() {
+  const FMP_KEY = process.env.FMP_API_KEY || "WQMcZiIIJ1rarvN3puluUNQoGXFdvkjg";
+  const now = new Date();
+  const etNow = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+
+  // Get Monday of current week
+  const day = etNow.getDay();
+  const monday = new Date(etNow);
+  monday.setDate(etNow.getDate() - (day === 0 ? 6 : day - 1));
+  monday.setHours(0,0,0,0);
+  const friday = new Date(monday);
+  friday.setDate(monday.getDate() + 4);
+
+  const fromStr = monday.toISOString().slice(0,10);
+  const toStr   = friday.toISOString().slice(0,10);
+  const weekKey = fromStr;
+
+  // Use cache if same week and less than 1 hour old
+  const cacheAge = Date.now() - weekAheadCache.fetchedAt;
+  if (weekAheadCache.data && weekAheadCache.weekKey === weekKey && cacheAge < 3600000) {
+    return weekAheadCache.data;
+  }
+
+  const [econRaw, earnRaw] = await Promise.allSettled([
+    fetchUrl("https://financialmodelingprep.com/stable/economic-calendar?from=" + fromStr + "&to=" + toStr + "&apikey=" + FMP_KEY),
+    fetchUrl("https://financialmodelingprep.com/stable/earnings-calendar?from=" + fromStr + "&to=" + toStr + "&apikey=" + FMP_KEY)
+  ]);
+
+  // ── Process econ events ──
+  const econEvents = [];
+  if (econRaw.status === "fulfilled") {
+    try {
+      const raw = JSON.parse(econRaw.value);
+      if (Array.isArray(raw)) {
+        raw.forEach(e => {
+          const name = (e.event || e.indicator || e.name || "").toLowerCase();
+          const country = (e.country || e.currency || "").toUpperCase();
+          const isUSD = country === "US" || country === "USD";
+          if (!isUSD) return;
+          const isTier1 = TIER1_ECON.some(k => name.includes(k));
+          const isTier2 = TIER2_ECON.some(k => name.includes(k));
+          if (!isTier1 && !isTier2) return;
+          const date = (e.date || "").slice(0,10);
+          const time = (e.date || "").slice(11,16) || "TBD";
+          const actual = e.actual !== null && e.actual !== undefined ? parseFloat(e.actual) : null;
+          const estimate = e.estimate !== null && e.estimate !== undefined ? parseFloat(e.estimate) : null;
+          const previous = e.previous !== null && e.previous !== undefined ? parseFloat(e.previous) : null;
+          let status = "scheduled";
+          let beat = null;
+          if (actual !== null) {
+            status = "released";
+            if (estimate !== null) {
+              beat = actual > estimate ? "beat" : actual < estimate ? "miss" : "inline";
+            }
+          }
+          econEvents.push({
+            date, time, name: e.event || e.indicator || e.name,
+            tier: isTier1 ? 1 : 2,
+            actual, estimate, previous, status, beat,
+            impact: e.impact || "Medium"
+          });
+        });
+      }
+    } catch(e) { console.log("WeekAhead econ parse error:", e.message); }
+  }
+
+  // ── Process earnings ──
+  const earnEvents = [];
+  if (earnRaw.status === "fulfilled") {
+    try {
+      const raw = JSON.parse(earnRaw.value);
+      if (Array.isArray(raw)) {
+        raw.forEach(e => {
+          const ticker = (e.symbol || "").toUpperCase();
+          if (!WATCH_TICKERS.has(ticker)) return;
+          const date = (e.date || "").slice(0,10);
+          const time = e.time || (e.when === "bmo" ? "BMO" : e.when === "amc" ? "AMC" : "TBD");
+          const when = (e.time || e.when || "").toLowerCase().includes("bmo") ? "BMO" : (e.time || e.when || "").toLowerCase().includes("amc") ? "AMC" : "TBD";
+          const epsActual = e.eps !== null && e.eps !== undefined ? parseFloat(e.eps) : null;
+          const epsEst = e.epsEstimated !== null && e.epsEstimated !== undefined ? parseFloat(e.epsEstimated) : null;
+          const revActual = e.revenue !== null && e.revenue !== undefined ? parseFloat(e.revenue) : null;
+          const revEst = e.revenueEstimated !== null && e.revenueEstimated !== undefined ? parseFloat(e.revenueEstimated) : null;
+          let status = "scheduled";
+          let beat = null;
+          if (epsActual !== null) {
+            status = "released";
+            if (epsEst !== null) beat = epsActual > epsEst ? "beat" : epsActual < epsEst ? "miss" : "inline";
+          }
+          earnEvents.push({
+            date, when, ticker, company: e.company || ticker,
+            epsActual, epsEst, revActual, revEst,
+            status, beat,
+            guidance: e.guidance || null
+          });
+        });
+      }
+    } catch(e) { console.log("WeekAhead earnings parse error:", e.message); }
+  }
+
+  // Sort both by date
+  econEvents.sort((a,b) => a.date.localeCompare(b.date) || (a.tier - b.tier));
+  earnEvents.sort((a,b) => a.date.localeCompare(b.date));
+
+  const data = { weekOf: fromStr, weekEnd: toStr, econ: econEvents, earnings: earnEvents, fetchedAt: new Date().toISOString() };
+  weekAheadCache = { data, fetchedAt: Date.now(), weekKey };
+  console.log("WeekAhead: fetched", econEvents.length, "econ events,", earnEvents.length, "earnings");
+  return data;
+}
+
+app.get("/api/week-ahead", async function(req, res) {
+  try {
+    const data = await fetchWeekAhead();
+    res.json(data);
+  } catch(e) {
+    console.error("WeekAhead error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
