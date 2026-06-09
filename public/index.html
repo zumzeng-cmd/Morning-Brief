@@ -1797,22 +1797,38 @@ function renderWeekAhead(data) {
       if (e.status==='released') cls += ' released-'+(e.beat||'inline');
       var resultHtml = '';
       if (e.status==='released' && e.epsActual!==null) {
+        // Released: show EPS and revenue vs estimates
         var beatCls = e.beat==='beat'?'beat':e.beat==='miss'?'miss':'inline';
         var beatLabel = e.beat==='beat'?'BEAT':e.beat==='miss'?'MISS':'IN-LINE';
         resultHtml = '<div class="sidebar-event-result '+beatCls+'">';
         resultHtml += 'EPS: '+e.epsActual.toFixed(2);
         if(e.epsEst!==null) resultHtml += ' vs '+e.epsEst.toFixed(2);
         resultHtml += ' → '+beatLabel;
-        if(e.revActual!==null) resultHtml += ' · Rev: '+(e.revActual/1e9).toFixed(1)+'B';
         resultHtml += '</div>';
-        if(e.guidance) resultHtml += '<div class="sidebar-event-meta" style="color:var(--accent2);">Guidance: '+e.guidance+'</div>';
+        // Revenue line separately
+        if(e.revActual!==null) {
+          var revBeat = e.revEst!==null ? (e.revActual>e.revEst?'beat':e.revActual<e.revEst?'miss':'inline') : null;
+          var revCls2 = revBeat==='beat'?'beat':revBeat==='miss'?'miss':'inline';
+          resultHtml += '<div class="sidebar-event-result '+revCls2+'">';
+          resultHtml += 'Rev: '+(e.revActual/1e9).toFixed(2)+'B';
+          if(e.revEst!==null) resultHtml += ' vs '+(e.revEst/1e9).toFixed(2)+'B';
+          if(revBeat) resultHtml += ' → '+revBeat.toUpperCase();
+          resultHtml += '</div>';
+        }
+        if(e.guidance) resultHtml += '<div class="sidebar-event-meta" style="color:var(--accent2);">▶ '+e.guidance+'</div>';
       }
       html += '<div class="'+cls+'">';
       var whenIcon2 = e.when==='BMO' ? '🌤' : e.when==='AMC' ? '🌙' : '⏰';
       html += '<div class="sidebar-event-name">'+whenIcon2+' '+e.ticker+'</div>';
       html += '<div class="sidebar-event-meta">'+(e.company||e.ticker)+' · '+e.when+(e.status==='released'?' · Released':' · Scheduled');
-      if(e.epsEst!==null && e.status!=='released') html += ' · EPS Est: '+e.epsEst.toFixed(2);
       html += '</div>';
+      // Scheduled: show EPS and revenue estimates
+      if (e.status!=='released') {
+        var estLine = '';
+        if(e.epsEst!==null) estLine += 'EPS Est: '+e.epsEst.toFixed(2);
+        if(e.revEst!==null) estLine += (estLine?' · ':'')+'Rev Est: '+(e.revEst/1e9).toFixed(2)+'B';
+        if(estLine) html += '<div class="sidebar-event-meta" style="color:var(--muted);opacity:0.8;">'+estLine+'</div>';
+      }
       html += resultHtml;
       html += '</div>';
     });
