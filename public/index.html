@@ -849,28 +849,13 @@ function setCardResult(key,result){
 
   if(isShockNews){
     window.marketShockActive = true;
+    // Discount other card scores by 50% — but don't change their labels
+    // Only the NEWS card gets the shock label — it's the source of the shock
     ['econ','earn','premarket'].forEach(function(k){
       scores[k] = scores[k] * 0.5;
     });
-    const econBody = document.getElementById('body-econ');
-    if(econBody && !econBody.dataset.shockWarning){
-      econBody.dataset.shockWarning = '1';
-      econBody.innerHTML = '<div style="color:#FFB800;font-size:11px;margin-bottom:6px;border-left:2px solid #FFB800;padding-left:6px;">&#9888;&#65039; MARKET SHOCK OVERRIDE — discounted 50%</div>' + econBody.textContent;
-    }
-    const earnBody = document.getElementById('body-earn');
-    if(earnBody && !earnBody.dataset.shockWarning){
-      earnBody.dataset.shockWarning = '1';
-      earnBody.innerHTML = '<div style="color:#FFB800;font-size:11px;margin-bottom:6px;border-left:2px solid #FFB800;padding-left:6px;">&#9888;&#65039; MARKET SHOCK OVERRIDE — discounted 50%</div>' + earnBody.textContent;
-    }
-    const preMktBody = document.getElementById('body-premarket');
-    if(preMktBody && !preMktBody.dataset.shockWarning){
-      preMktBody.dataset.shockWarning = '1';
-      preMktBody.innerHTML = '<div style="color:#FFB800;font-size:11px;margin-bottom:6px;border-left:2px solid #FFB800;padding-left:6px;">&#9888;&#65039; MARKET SHOCK OVERRIDE — discounted 50%</div>' + preMktBody.textContent;
-    }
-    ['econ','earn','premarket'].forEach(function(k){
-      const sigEl = document.getElementById('sig-'+k);
-      if(sigEl){ sigEl.textContent = '⚠️ SHOCK'; sigEl.className = 'card-sig'; sigEl.style.color='#FFB800'; sigEl.style.background='rgba(255,184,0,0.1)'; sigEl.style.border='1px solid rgba(255,184,0,0.3)'; }
-    });
+    // Other cards keep their own signal pills unchanged
+    // Scores are discounted 50% silently — no label needed
   }
 
   // After US open, premarket score is always 0 regardless of result
