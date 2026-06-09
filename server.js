@@ -766,12 +766,13 @@ const EARN_PROMPT = [
 
 const PREMARKET_PROMPT = [
   "From this data, score pre-market sentiment for US index futures (NQ/ES) using this exact methodology:",
-  "ASIA SCORE: Count each of these 5 indices individually — HSI, Nikkei 225, ASX 200, Shanghai Composite, STI. Rule: up %  = bullish count, down % = bearish count, flat = neutral (ignore). If bullish count > bearish count = Asia BULLISH. If bearish count > bullish count = Asia BEARISH. If tied = Asia NEUTRAL. Example: 3 up, 2 down = Asia BULLISH. Example: 1 up, 2 down, 2 flat = Asia BEARISH.",
-  "EUROPE SCORE: Same individual count for STOXX 600, DAX, FTSE 100, AEX, CAC 40. Bullish count > bearish = Europe BULLISH. Bearish count > bullish = Europe BEARISH.",
-  "US FUTURES: NQ, ES, YM direction if available — use as primary signal.",
-  "WEIGHTING RULE — priority order: (1) US futures wins outright if available. (2) If Europe and Asia disagree, EUROPE wins. (3) Asia only if Europe unavailable.",
-  "FINAL SIGNAL EXAMPLES: Asia BULLISH + Europe BULLISH = BULL. Asia BEARISH + Europe BULLISH = BULL (Europe wins disagreement). Asia NEUTRAL + Europe BULLISH = BULL. Asia BEARISH + Europe BEARISH = BEAR.",
-  "SUMMARY: State Asia verdict (X bullish, Y bearish of 5), Europe verdict (X bullish, Y bearish of 5), US futures direction. Two sentences max.",
+  "DATA RULE: Always use the MOST RECENT data available — FINAL CLOSING prices for markets that have closed, CURRENT prices for markets still open. If markets reversed direction during the session (e.g. opened bullish but closed bearish due to news), use the FINAL CLOSE, not the intraday high.",
+  "ASIA SCORE: Count each of these 5 indices individually — HSI, Nikkei 225, ASX 200, Shanghai Composite, STI. Use FINAL CLOSING % change. Rule: up = bullish count, down = bearish count. If bullish count > bearish count = Asia BULLISH. If bearish count > bullish count = Asia BEARISH. If tied = Asia NEUTRAL.",
+  "EUROPE SCORE: Same count for STOXX 600, DAX, FTSE 100, AEX, CAC 40. Use FINAL CLOSING prices — if European markets closed before a major US session event, note that in summary.",
+  "US FUTURES: Use CURRENT pre-market direction of NQ, ES, YM as primary signal — these reflect the most recent pricing.",
+  "WEIGHTING RULE: (1) Current US futures wins outright — they reflect the most recent information. (2) If no US futures data, Europe final close wins over Asia. (3) Asia only if Europe unavailable.",
+  "FINAL SIGNAL EXAMPLES: US futures bearish overrides earlier bullish Europe close. Asia BEARISH + Europe BULLISH = BULL (Europe wins). All bearish = BEAR.",
+  "SUMMARY: State Asia final close (X bullish, Y bearish of 5), Europe final close (X bullish, Y bearish of 5), current US futures direction. Note if markets reversed on late-breaking news. Two sentences max.",
   "Score: bull=1, bear=-1, neutral=0.",
   "JSON SCHEMA: {\"signal\":\"bull|bear|neutral\",\"summary\":\"2 sentence summary\",\"score\":1,\"guidance\":null}"
 ].join(" ");
@@ -2195,6 +2196,7 @@ const WATCH_TICKERS = new Set([...MEGA_CAPS, ...LARGE_CAPS]);
 
 const TIER1_ECON = ["nonfarm","payroll","consumer price index","cpi","personal consumption expenditure","pce","fomc","federal open market","fed rate","interest rate decision","gross domestic product","gdp"];
 const TIER2_ECON = ["jobless claims","initial claims","jolts","adp employment","unemployment rate","average hourly","producer price","ppi","ism manufacturing","ism services","retail sales","industrial production"];
+const ECON_EXCLUDE = ["gdpnow","nowcast","atlanta fed","cleveland fed","new york fed nowcast","sticky price","wage growth tracker","fedspeak","fed speak","treasury auction","bill auction","note auction","bond auction","redbook","nfib","baker hughes","rig count","api crude","api oil","dallas fed","richmond fed","kansas city fed","chicago pmi","national activity","abc consumer","mortgage","purchasing managers","markit"];
 
 var weekAheadCache = { data: null, fetchedAt: 0, weekKey: null };
 
@@ -2240,6 +2242,9 @@ async function fetchWeekAhead() {
           const isTier1 = TIER1_ECON.some(k => name.includes(k));
           const isTier2 = TIER2_ECON.some(k => name.includes(k));
           if (!isTier1 && !isTier2) return;
+          // Exclude nowcasts, regional feds, auctions regardless of tier match
+          const isExcluded = ECON_EXCLUDE.some(k => name.includes(k));
+          if (isExcluded) return;
           const date = (e.date || "").slice(0,10);
           const time = (e.date || "").slice(11,16) || "TBD";
           const actual = e.actual !== null && e.actual !== undefined ? parseFloat(e.actual) : null;
