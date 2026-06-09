@@ -1266,17 +1266,19 @@ const MARKETS_PROMPT = [
   "",
   "INSTRUMENTS: ES (S&P 500), NQ (Nasdaq 100), YM (Dow Jones), RTY (Russell 2000), GC (Gold), SI (Silver), HG (Copper), PL (Platinum), CL (Crude Oil), NG (Natural Gas), DXY (US Dollar Index)",
   "",
-  "SCORING RULES:",
-  "- Score based on the DOMINANT catalyst for each instrument specifically — not the overall market bias",
-  "- Different instruments can have opposite biases on the same day (e.g. CL bull while equities bear)",
-  "- Geopolitical escalation: GC bull (safe-haven), CL bull (supply risk), equities bear, DXY bull",
-  "- Geopolitical de-escalation or deal signals: GC bear (safe-haven unwind), CL bear (supply risk fading), equities bull",
-  "- Fed hawkish / higher-for-longer: NQ most bearish (rate sensitive), DXY bull, GC headwind",
-  "- Fed dovish / rate cut signal: NQ bull, DXY bear, GC bull",
-  "- Strong jobs/inflation data under GNISBN regime: equities bear (bad news is bad), DXY bull",
-  "- China stimulus: HG bull, risk-on equities bull",
-  "- Growth fears / recession: HG bear, CL bear, RTY most bearish",
-  "- NG is ONLY affected by weather, storage reports, LNG demand — not macro or geopolitics. Default neutral unless specific NG catalyst exists.",
+  "SCORING PHILOSOPHY: Every instrument sits at the intersection of multiple competing forces. Identify ALL forces acting on each instrument today — what is pushing it up AND what is pushing it down — then score the NET direction. Never assign a score from a single catalyst alone.",
+  "",
+  "GC (Gold): Competing forces — safe-haven bid (escalation/fear = bullish) vs dollar strength (USD is also a safe haven = DXY up = bearish for USD-denominated gold) vs real yields (hawkish Fed/inflation = higher yields = bearish opportunity cost). Geopolitical escalation does NOT automatically make gold bullish. If DXY surges alongside, the net effect may be neutral or bearish. Under GNISBN with elevated real yields, the yield/dollar headwind often offsets or overwhelms the safe-haven bid. Always state both forces.",
+  "SI (Silver): Follows GC direction amplified, with added industrial demand exposure. Risk-off weakens industrial demand (additional bearish force). More volatile than gold.",
+  "HG (Copper): Pure industrial demand proxy — NOT a safe haven. Risk-off = growth fears = bearish. Dollar strength = bearish. China stimulus = bullish. Geopolitical escalation is bearish for copper (demand destruction fears), not bullish.",
+  "PL (Platinum): Industrial/automotive demand. Risk-off is bearish. No meaningful safe-haven bid. Dollar strength is a headwind.",
+  "CL (Crude Oil): Supply risk from Middle East conflict = bullish premium. BUT: dollar strength from same risk-off = bearish headwind (oil is USD-denominated). Growth fears/demand destruction = bearish. Net: score bull only if supply route threat clearly dominates dollar and demand headwinds.",
+  "NG (Natural Gas): Weather, storage reports, LNG export demand ONLY. Not affected by geopolitics, macro, rates, or equity direction. Default neutral.",
+  "DXY (US Dollar): Risk-off/safe-haven = bullish. Fed hawkish/strong data = bullish. Risk-on/Fed dovish/weak data = bearish. Geopolitical escalation = bullish (USD is the ultimate safe haven). DXY strength creates headwinds for ALL USD-denominated commodities simultaneously.",
+  "NQ (Nasdaq 100): Most sensitive to real yields and rate expectations. Tech/growth multiples compress with higher yields. Geopolitical risk-off hits NQ hardest among equity indices.",
+  "ES (S&P 500): Broader than NQ — more defensive sectors provide cushion. Still bearish on risk-off but less than NQ.",
+  "YM (Dow Jones): Most defensive equity index — heavy in dividend/value stocks. Least sensitive to rate moves. Outperforms NQ/ES in risk-off if driven by yield concerns.",
+  "RTY (Russell 2000): Most vulnerable to risk-off, recession fears, and dollar strength. Small-caps have least pricing power and most credit sensitivity.",
   "",
   "BEST SETUP RULES:",
   "- Only flag as best setup when there is HIGH CONVICTION — multiple signals align, clear catalyst, instrument is most sensitive to today's dominant theme",
@@ -2401,25 +2403,36 @@ async function fetchWeekAhead() {
 
   // ── Notable events (IPOs, Fed speeches, major expirations) ──
   const notableEvents = [];
-  try {
-    const ipoRaw = await fetchUrl(
-      "https://financialmodelingprep.com/stable/ipos-confirmed-domestic?from=" + fromStr + "&to=" + toStr + "&apikey=" + FMP_KEY
-    );
-    const ipoJson = JSON.parse(ipoRaw);
-    if (Array.isArray(ipoJson)) {
-      ipoJson.slice(0, 8).forEach(ipo => {
+  // Try multiple IPO endpoints — FMP has inconsistent endpoint naming
+  const ipoEndpoints = [
+    "https://financialmodelingprep.com/stable/ipos-confirmed?from=" + fromStr + "&to=" + toStr + "&apikey=" + FMP_KEY,
+    "https://financialmodelingprep.com/stable/ipos-calendar?from=" + fromStr + "&to=" + toStr + "&apikey=" + FMP_KEY,
+    "https://financialmodelingprep.com/stable/ipo-calendar?from=" + fromStr + "&to=" + toStr + "&apikey=" + FMP_KEY,
+  ];
+  const ipoSeen = new Set();
+  for (const ipoUrl of ipoEndpoints) {
+    try {
+      const ipoRaw = await fetchUrl(ipoUrl);
+      const ipoJson = JSON.parse(ipoRaw);
+      const arr = Array.isArray(ipoJson) ? ipoJson : (ipoJson.ipoCalendar || []);
+      arr.slice(0, 10).forEach(ipo => {
         const date = (ipo.date || ipo.ipoDate || "").slice(0,10);
-        if (!date) return;
+        const sym = (ipo.symbol || ipo.ticker || "").toUpperCase();
+        const key = sym + "|" + date;
+        if (!date || ipoSeen.has(key)) return;
+        ipoSeen.add(key);
         notableEvents.push({
           date, type: "IPO",
-          name: ipo.company || ipo.name || ipo.symbol || "Unknown",
-          symbol: ipo.symbol || "",
-          detail: ipo.exchange ? ipo.exchange + " IPO" : "IPO",
-          priceRange: ipo.priceRange || (ipo.price ? "$" + ipo.price : null)
+          name: ipo.company || ipo.companyName || ipo.name || sym || "Unknown",
+          symbol: sym,
+          detail: (ipo.exchange || ipo.market || "IPO"),
+          priceRange: ipo.priceRange || ipo.offerPrice || (ipo.price ? "$" + ipo.price : null)
         });
       });
-    }
-  } catch(e) { console.log("IPO fetch error:", e.message); }
+      if (notableEvents.length > 0) break; // stop if first endpoint returned data
+    } catch(e) { console.log("IPO endpoint error:", ipoUrl.slice(-30), e.message); }
+  }
+  console.log("WeekAhead: found", notableEvents.length, "notable events");
 
   notableEvents.sort((a,b) => a.date.localeCompare(b.date));
 
