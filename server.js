@@ -766,12 +766,12 @@ const EARN_PROMPT = [
 
 const PREMARKET_PROMPT = [
   "From this data, score pre-market sentiment for US index futures (NQ/ES) using this exact methodology:",
-  "ASIA SCORE: Evaluate these 5 indices — HSI (Hang Seng), Nikkei 225, ASX 200, Shanghai Composite, STI. Majority rule: 3+ bullish = Asia bullish, 3+ bearish = Asia bearish, otherwise neutral.",
-  "EUROPE SCORE: Evaluate these 5 indices — STOXX 600, DAX, FTSE 100, AEX, CAC 40. Same majority rule.",
-  "US FUTURES: NQ, ES, YM direction if available — use as primary tiebreaker.",
-  "WEIGHTING RULE: Europe carries MORE weight than Asia for US open direction because European markets close closer to the US open (11:30am ET) and have higher intraday correlation to ES/NQ. Apply this priority: (1) If US futures direction is available, it wins outright. (2) If Europe and Asia disagree, EUROPE wins — score based on Europe's signal. (3) Only use pure Asia signal if Europe data is unavailable.",
-  "FINAL SIGNAL EXAMPLES: Asia neutral + Europe bullish = BULL. Asia bearish + Europe bullish = BULL (Europe wins). Asia bullish + Europe neutral = BULL. Asia bearish + Europe bearish = BEAR. All neutral = NEUTRAL.",
-  "SUMMARY RULE: State (1) Asia verdict with key indices, (2) Europe verdict with key indices, (3) US futures if available. Two sentences max.",
+  "ASIA SCORE: Count each of these 5 indices individually — HSI, Nikkei 225, ASX 200, Shanghai Composite, STI. Rule: up %  = bullish count, down % = bearish count, flat = neutral (ignore). If bullish count > bearish count = Asia BULLISH. If bearish count > bullish count = Asia BEARISH. If tied = Asia NEUTRAL. Example: 3 up, 2 down = Asia BULLISH. Example: 1 up, 2 down, 2 flat = Asia BEARISH.",
+  "EUROPE SCORE: Same individual count for STOXX 600, DAX, FTSE 100, AEX, CAC 40. Bullish count > bearish = Europe BULLISH. Bearish count > bullish = Europe BEARISH.",
+  "US FUTURES: NQ, ES, YM direction if available — use as primary signal.",
+  "WEIGHTING RULE — priority order: (1) US futures wins outright if available. (2) If Europe and Asia disagree, EUROPE wins. (3) Asia only if Europe unavailable.",
+  "FINAL SIGNAL EXAMPLES: Asia BULLISH + Europe BULLISH = BULL. Asia BEARISH + Europe BULLISH = BULL (Europe wins disagreement). Asia NEUTRAL + Europe BULLISH = BULL. Asia BEARISH + Europe BEARISH = BEAR.",
+  "SUMMARY: State Asia verdict (X bullish, Y bearish of 5), Europe verdict (X bullish, Y bearish of 5), US futures direction. Two sentences max.",
   "Score: bull=1, bear=-1, neutral=0.",
   "JSON SCHEMA: {\"signal\":\"bull|bear|neutral\",\"summary\":\"2 sentence summary\",\"score\":1,\"guidance\":null}"
 ].join(" ");
@@ -1027,7 +1027,7 @@ const META_PROMPT = [
   "Weight 2 = Low impact (background noise, already priced in, conflicting signals).",
   "Weight 1 = Negligible (stale data, no confirmed actuals, neutral/mixed with no clear direction).",
   "DYNAMIC RULES: On NFP/CPI/FOMC days, econ starts at weight 5 and pre-market gets weight 1 (pre-market just reflects the same data). On mega-cap earnings days with no macro, earnings gets 5. News max weight is 4 (never 5 unless MARKET_SHOCK_OVERRIDE).",
-  "PRE-MARKET WEIGHT RULES: Pre-market is a SUPPORTING indicator only — it confirms or contradicts other signals but NEVER sets the day's direction alone. HARD CAP: pre-market max weight is 2 at all times before open. Once US markets open (9:30am ET), pre-market weight is capped at 1 — the overnight data is stale. CRITICAL: If pre-market is the ONLY card with a directional signal, still assign it weight 1 only — a single overnight data point is not sufficient conviction to call the day bullish or bearish.",
+  "PRE-MARKET WEIGHT RULES: Pre-market weight is ALWAYS 1 — no exceptions. It is a supporting confirmation signal only, never a primary driver. A bullish or bearish pre-market alone cannot set the day's sentiment. Assign weight 1 regardless of how strong the overnight signal appears.",
   "MARKET REACTION RULE (CRITICAL): The market's actual price reaction always takes precedence over the raw data beat or miss. If econ is bullish (data beat) BUT news is bearish (market is selling the news — e.g. yields spiking, equities falling), this means the market is REJECTING the bullish interpretation. In this case: REDUCE econ weight by 2 (min 2) and INCREASE news weight by 2 (max 4). The news card captures real-time price action; when it contradicts econ, it wins. Example: NFP beats big (econ=bull) but 10yr yield spikes above 4.5% and NQ sells off (news=bear) = econ weight drops from 5 to 3, news weight rises from 2 to 4.",
   "CONTRADICTION RULE: If pre-market and news both contradict econ, treat that as strong confirmation that the market is not trading the data bullishly. In this scenario econ weight max is 3.",
   "RATIONALE: One sentence explaining what is driving the market today, whether the market is trading the data or rejecting it, and why you weighted things the way you did.",
@@ -1131,13 +1131,10 @@ app.post("/api/meta-score", async function(req, res) {
       console.log("Meta: pre-market score zeroed after open (was " + premarket.score + ") — card text preserved for context");
     }
 
-    // Pre-market is always a supporting indicator — hard cap at 2 pre-open, 1 after open
-    if (afterOpen && weights.premarket > 1) {
+    // Pre-market is ALWAYS weight 1 — it confirms or contradicts but never drives sentiment alone
+    if (weights.premarket > 1) {
       weights.premarket = 1;
-      console.log("Meta: pre-market weight capped at 1 (US session open)");
-    } else if (!afterOpen && weights.premarket > 2) {
-      weights.premarket = 2;
-      console.log("Meta: pre-market weight capped at 2 (pre-open max)");
+      console.log("Meta: pre-market weight hard-capped at 1");
     }
 
     // SOLO PRE-MARKET RULE: After open, pre-market alone cannot drive bullish/bearish bias.
