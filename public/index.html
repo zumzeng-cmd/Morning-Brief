@@ -793,17 +793,7 @@ function clearOverride(key,btn){
       if (pts > 0) ptsEl.className = 'card-pts pts-bull';
       else if (pts < 0) ptsEl.className = 'card-pts pts-bear';
     }
-    // Re-add AT OPEN badge for premarket after restore
-    if (key === 'premarket' && sessionOpenClear && ptsEl) {
-      var footer = ptsEl.parentElement;
-      if (footer && !footer.querySelector('.at-open-badge')) {
-        var badge = document.createElement('span');
-        badge.className = 'at-open-badge';
-        badge.textContent = 'AT OPEN ✓';
-        badge.style.cssText = 'font-size:9px;padding:1px 6px;border-radius:2px;background:rgba(74,86,104,0.2);color:var(--muted);border:1px solid var(--border2);letter-spacing:0.06em;margin-left:4px;';
-        footer.appendChild(badge);
-      }
-    }
+    // AT OPEN badge removed
     // Restore signal pill
     var sigEl = document.getElementById('sig-' + key);
     if (sigEl) {
@@ -878,20 +868,7 @@ function setCardResult(key,result){
   document.getElementById('card-'+key).className='card '+(result.signal==='bull'?'bull':result.signal==='bear'?'bear':'');
   if(!overrides[key]) scores[key] = effectiveScore; // always use effective score (0 for premarket after open)
 
-  // Add/maintain AT OPEN badge for premarket after session starts
-  if (key === 'premarket' && sessionOpenSCR) {
-    var ptsEl2 = document.getElementById('pts-premarket');
-    if (ptsEl2) {
-      var footer2 = ptsEl2.parentElement;
-      if (footer2 && !footer2.querySelector('.at-open-badge')) {
-        var badge2 = document.createElement('span');
-        badge2.className = 'at-open-badge';
-        badge2.textContent = 'AT OPEN ✓';
-        badge2.style.cssText = 'font-size:9px;padding:1px 6px;border-radius:2px;background:rgba(74,86,104,0.2);color:var(--muted);border:1px solid var(--border2);letter-spacing:0.06em;margin-left:4px;';
-        footer2.appendChild(badge2);
-      }
-    }
-  }
+  // AT OPEN badge removed — behavior preserved (score still zeroed after open)
 
   updateBias();
 }
@@ -1265,17 +1242,7 @@ async function runAll(){
           if (pts > 0) ptsEl.className = 'card-pts pts-bull';
           else if (pts < 0) ptsEl.className = 'card-pts pts-bear';
         }
-        // Add AT OPEN badge to premarket card footer after session starts
-        if (k === 'premarket' && sessionOpen && ptsEl) {
-          var footer = ptsEl.parentElement;
-          if (footer && !footer.querySelector('.at-open-badge')) {
-            var badge = document.createElement('span');
-            badge.className = 'at-open-badge';
-            badge.textContent = 'AT OPEN ✓';
-            badge.style.cssText = 'font-size:9px;padding:1px 6px;border-radius:2px;background:rgba(74,86,104,0.2);color:var(--muted);border:1px solid var(--border2);letter-spacing:0.06em;margin-left:4px;';
-            footer.appendChild(badge);
-          }
-        }
+        // AT OPEN badge removed
       });
 
       // Update bias banner
