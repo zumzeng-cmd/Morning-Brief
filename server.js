@@ -904,6 +904,22 @@ app.post("/api/analyze", async function(req, res) {
           console.log("Econ: using web search | regime:", regimeCache.regime || "default-GNISBN");
         }
       }
+      // Append upcoming week econ events for context
+      try {
+        const wEcon = await fetchWeekAhead();
+        if (wEcon && wEcon.econ) {
+          const upEcon = wEcon.econ.filter(e => e.status === "scheduled").slice(0, 6).map(e => {
+            const d = new Date(e.date + "T12:00:00");
+            const dn = d.toLocaleDateString("en-US", {weekday:"long"});
+            let ts = "";
+            if (e.time && e.time !== "TBD") {
+              try { const tp = e.time.split(":"); const td = new Date(); td.setUTCHours(parseInt(tp[0]),parseInt(tp[1]||0),0,0); ts = " at " + td.toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit",hour12:true,timeZone:"America/New_York"}) + " ET"; } catch(te){}
+            }
+            return "• " + e.name + " — " + dn + ts;
+          }).join("\n");
+          if (upEcon) rawData = (rawData || "") + "\n\nUPCOMING HIGH IMPACT EVENTS THIS WEEK:\n" + upEcon + "\n[Mention the next upcoming event in your summary if no data today]";
+        }
+      } catch(we) {}
     } else if (topic === "earn") {
       const today3 = new Date();
       const todayStr3 = today3.toISOString().slice(0, 10);
@@ -926,6 +942,20 @@ app.post("/api/analyze", async function(req, res) {
           console.log("Earnings: using web search for mega-cap results");
         }
       }
+      // Append upcoming earnings for context
+      try {
+        const wEarn = await fetchWeekAhead();
+        if (wEarn && wEarn.earnings) {
+          const upEarn = wEarn.earnings.filter(e => e.status === "scheduled").slice(0, 8).map(e => {
+            const d = new Date(e.date + "T12:00:00");
+            const dn = d.toLocaleDateString("en-US", {weekday:"long"});
+            const revStr = e.revEst ? " · Rev Est: $" + (e.revEst/1e9).toFixed(1) + "B" : "";
+            const epsStr = e.epsEst ? " · EPS Est: $" + e.epsEst.toFixed(2) : "";
+            return "• " + e.ticker + " (" + (e.company||e.ticker) + ") — " + dn + " " + e.when + epsStr + revStr;
+          }).join("\n");
+          if (upEarn) rawData = (rawData || "") + "\n\nUPCOMING EARNINGS THIS WEEK:\n" + upEarn + "\n[Mention the next notable company in your summary if no earnings today]";
+        }
+      } catch(we) {}
     } else if (topic === "premarket") {
       prompt = PREMARKET_PROMPT;
       if (latestMakeData.premarket && latestMakeData.premarket.length > 50) {
@@ -1656,7 +1686,23 @@ app.post("/api/backtest", async function(req, res) {
         prompt = ECON_PROMPT.replace("REGIME_PLACEHOLDER", regimeForDate);
         if (!rawData) { rawData = "NO FMP DATA"; useSearch = true; }
 
-      } else if (topic === "earn") {
+        // Append upcoming week econ events for context
+      try {
+        const wEcon = await fetchWeekAhead();
+        if (wEcon && wEcon.econ) {
+          const upEcon = wEcon.econ.filter(e => e.status === "scheduled").slice(0, 6).map(e => {
+            const d = new Date(e.date + "T12:00:00");
+            const dn = d.toLocaleDateString("en-US", {weekday:"long"});
+            let ts = "";
+            if (e.time && e.time !== "TBD") {
+              try { const tp = e.time.split(":"); const td = new Date(); td.setUTCHours(parseInt(tp[0]),parseInt(tp[1]||0),0,0); ts = " at " + td.toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit",hour12:true,timeZone:"America/New_York"}) + " ET"; } catch(te){}
+            }
+            return "• " + e.name + " — " + dn + ts;
+          }).join("\n");
+          if (upEcon) rawData = (rawData || "") + "\n\nUPCOMING HIGH IMPACT EVENTS THIS WEEK:\n" + upEcon + "\n[Mention the next upcoming event in your summary if no data today]";
+        }
+      } catch(we) {}
+    } else if (topic === "earn") {
         try {
           const [todayRaw, yestRaw] = await Promise.all([
             fetchUrl("https://financialmodelingprep.com/stable/earnings-calendar?from=" + dateStr + "&to=" + dateStr + "&apikey=" + FMP_KEY),
@@ -1667,7 +1713,21 @@ app.post("/api/backtest", async function(req, res) {
         prompt = EARN_PROMPT + " CURRENT TIME (ET): 09:30 AM. BACKTEST DATE: " + dateStr + ".";
         if (!rawData) { rawData = "NO FMP DATA"; useSearch = true; }
 
-      } else if (topic === "premarket") {
+        // Append upcoming earnings for context
+      try {
+        const wEarn = await fetchWeekAhead();
+        if (wEarn && wEarn.earnings) {
+          const upEarn = wEarn.earnings.filter(e => e.status === "scheduled").slice(0, 8).map(e => {
+            const d = new Date(e.date + "T12:00:00");
+            const dn = d.toLocaleDateString("en-US", {weekday:"long"});
+            const revStr = e.revEst ? " · Rev Est: $" + (e.revEst/1e9).toFixed(1) + "B" : "";
+            const epsStr = e.epsEst ? " · EPS Est: $" + e.epsEst.toFixed(2) : "";
+            return "• " + e.ticker + " (" + (e.company||e.ticker) + ") — " + dn + " " + e.when + epsStr + revStr;
+          }).join("\n");
+          if (upEarn) rawData = (rawData || "") + "\n\nUPCOMING EARNINGS THIS WEEK:\n" + upEarn + "\n[Mention the next notable company in your summary if no earnings today]";
+        }
+      } catch(we) {}
+    } else if (topic === "premarket") {
         rawData = await fetchHistoricalPremarket(dateStr);
         prompt = PREMARKET_PROMPT;
         if (!rawData) {
@@ -1784,7 +1844,23 @@ async function runBacktestJob(jobId, date) {
         } catch(e) { rawData = null; }
         prompt = ECON_PROMPT.replace("REGIME_PLACEHOLDER", "Use the correct market regime for " + date + " based on Fed policy and inflation at that time.");
         if (!rawData) useSearch = true;
-      } else if (topic === "earn") {
+        // Append upcoming week econ events for context
+      try {
+        const wEcon = await fetchWeekAhead();
+        if (wEcon && wEcon.econ) {
+          const upEcon = wEcon.econ.filter(e => e.status === "scheduled").slice(0, 6).map(e => {
+            const d = new Date(e.date + "T12:00:00");
+            const dn = d.toLocaleDateString("en-US", {weekday:"long"});
+            let ts = "";
+            if (e.time && e.time !== "TBD") {
+              try { const tp = e.time.split(":"); const td = new Date(); td.setUTCHours(parseInt(tp[0]),parseInt(tp[1]||0),0,0); ts = " at " + td.toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit",hour12:true,timeZone:"America/New_York"}) + " ET"; } catch(te){}
+            }
+            return "• " + e.name + " — " + dn + ts;
+          }).join("\n");
+          if (upEcon) rawData = (rawData || "") + "\n\nUPCOMING HIGH IMPACT EVENTS THIS WEEK:\n" + upEcon + "\n[Mention the next upcoming event in your summary if no data today]";
+        }
+      } catch(we) {}
+    } else if (topic === "earn") {
         try {
           const [todayRaw, yestRaw] = await Promise.all([
             fetchUrl("https://financialmodelingprep.com/stable/earnings-calendar?from=" + date + "&to=" + date + "&apikey=" + FMP_KEY),
@@ -1794,7 +1870,21 @@ async function runBacktestJob(jobId, date) {
         } catch(e) { rawData = null; }
         prompt = EARN_PROMPT + " CURRENT TIME (ET): 09:30 AM. BACKTEST DATE: " + date + ".";
         if (!rawData) useSearch = true;
-      } else if (topic === "premarket") {
+        // Append upcoming earnings for context
+      try {
+        const wEarn = await fetchWeekAhead();
+        if (wEarn && wEarn.earnings) {
+          const upEarn = wEarn.earnings.filter(e => e.status === "scheduled").slice(0, 8).map(e => {
+            const d = new Date(e.date + "T12:00:00");
+            const dn = d.toLocaleDateString("en-US", {weekday:"long"});
+            const revStr = e.revEst ? " · Rev Est: $" + (e.revEst/1e9).toFixed(1) + "B" : "";
+            const epsStr = e.epsEst ? " · EPS Est: $" + e.epsEst.toFixed(2) : "";
+            return "• " + e.ticker + " (" + (e.company||e.ticker) + ") — " + dn + " " + e.when + epsStr + revStr;
+          }).join("\n");
+          if (upEarn) rawData = (rawData || "") + "\n\nUPCOMING EARNINGS THIS WEEK:\n" + upEarn + "\n[Mention the next notable company in your summary if no earnings today]";
+        }
+      } catch(we) {}
+    } else if (topic === "premarket") {
         rawData = await fetchHistoricalPremarket(date);
         prompt = PREMARKET_PROMPT;
         if (!rawData) { prompt = buildMemoryPrompt("premarket", date); useSearch = true; }
