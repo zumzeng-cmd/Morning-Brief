@@ -360,14 +360,13 @@ body.backtest-mode .run-btn:hover:not(:disabled) { background: rgba(255,184,0,0.
 }
 .sidebar-toggle {
   position: fixed; left: 308px; top: 14px;
-  width: 32px; height: 32px; border-radius: 50%;
-  background: var(--surface); border: 2px solid var(--accent);
+  width: 28px; height: 28px; border-radius: 4px;
+  background: var(--surface2); border: 1px solid var(--border2);
   cursor: pointer; display: flex; align-items: center; justify-content: center;
-  font-size: 12px; color: var(--accent); z-index: 100;
-  box-shadow: 0 0 10px rgba(0,255,148,0.35);
-  transition: left 0.25s, background 0.2s, box-shadow 0.2s;
+  font-size: 11px; color: var(--muted); z-index: 100;
+  transition: left 0.25s, background 0.2s, color 0.2s, border-color 0.2s;
 }
-.sidebar-toggle:hover { background: rgba(0,255,148,0.15); box-shadow: 0 0 16px rgba(0,255,148,0.5); }
+.sidebar-toggle:hover { background: var(--surface); border-color: var(--accent); color: var(--accent); }
 .sidebar-week.collapsed ~ * .sidebar-toggle,
 body.sidebar-collapsed .sidebar-toggle { left: 20px; }
 .sidebar-inner { padding: 16px 14px; opacity: 1; transition: opacity 0.15s; }
@@ -955,7 +954,12 @@ function renderSnapshot(entry){
 }
 
 async function analyze(topic){
-  const res=await fetch(BASE+'/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topic})});
+  // Pass news result to premarket so it can detect market shock context
+  const extraBody = {};
+  if (topic === 'premarket' && lastResults && lastResults.news) {
+    extraBody.newsResult = { summary: lastResults.news.summary || '' };
+  }
+  const res=await fetch(BASE+'/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topic, ...extraBody})});
   if(!res.ok) throw new Error('Server error '+res.status);
   return res.json();
 }
