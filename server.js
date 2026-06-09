@@ -977,15 +977,23 @@ app.post("/api/analyze", async function(req, res) {
       }
     } else if (topic === "news") {
       prompt = NEWS_PROMPT;
-      rawData = latestMakeData.news || await fetchNews();
-      if (latestMakeData.news) console.log("News: using Make.com data");
-      else console.log("News: using CNBC scrape");
+      if (latestMakeData.news && latestMakeData.news.length > 50) {
+        rawData = latestMakeData.news;
+        console.log("News: using Make.com data");
+      } else {
+        // Use CNBC scrape as base data BUT also enable web search
+        // Web search catches breaking news that CNBC scrape misses (e.g. Trump statements, diplomatic signals)
+        const cnbcData = await fetchNews();
+        rawData = cnbcData || "NO CNBC DATA";
+        useSearch = true;
+        const todayNewsStr = new Date().toLocaleDateString("en-US", { weekday:"long", month:"long", day:"numeric", year:"numeric" });
+        prompt = NEWS_PROMPT + " IMPORTANT: The CNBC page data above may be incomplete or delayed. Use web search to supplement — search for 'market moving news today " + todayNewsStr + "' to find any breaking developments (geopolitical statements, Fed comments, economic surprises, corporate news) that may not appear in the CNBC data. Prioritize the FRESHEST and most market-moving stories from EITHER source.";
+        console.log("News: using CNBC scrape + web search supplement");
+      }
     } else {
       return res.status(400).json({ error: "Unknown topic" });
     }
 
-    // Track last Sonnet web search time for rate limit management
-    if (useSearch) global.lastSonnetCallMs = Date.now();
     // Track last Sonnet web search time for rate limit management
     if (useSearch) global.lastSonnetCallMs = Date.now();
     const result = await callClaudeWithRetry(prompt, rawData, useSearch);
