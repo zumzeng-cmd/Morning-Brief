@@ -1175,7 +1175,12 @@ async function runAll(){
     if (regData.regime) {
       regimeBadge.textContent = regData.regime;
       regimeBadge.className = 'regime-badge regime-' + regData.regime;
-      regimeConf.textContent = 'Confidence: ' + (regData.confidence || '?') + '/5';
+      // Show Fed rate info alongside confidence
+      var confText = 'Confidence: ' + (regData.confidence || '?') + '/5';
+      if (regData.fedFundsRange)  confText += ' | Fed: ' + regData.fedFundsRange;
+      if (regData.cpiThreshold)   confText += ' | CPI threshold: ' + regData.cpiThreshold + '%';
+      if (regData.nextFOMC)       confText += ' | Next FOMC: ' + regData.nextFOMC;
+      regimeConf.textContent = confText;
     } else {
       regimeBadge.textContent = 'UNDETERMINED';
       regimeBadge.className = 'regime-badge';
