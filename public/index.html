@@ -482,7 +482,7 @@ body.sidebar-collapsed .sidebar-toggle { left: 20px; }
       <span class="regime-conf" id="regimeConf"></span>
       <button class="regime-reset-btn" onclick="resetRegime()" title="Force re-detect regime">↺ RE-DETECT</button>
     </div>
-    <div id="regimeFedInfo" style="font-size:10px;color:#E2E8F0;letter-spacing:0.03em;padding-left:4px;display:none;opacity:0.9;"></div>
+    <div id="regimeFedInfo" style="font-size:10px;color:#E2E8F0;letter-spacing:0.03em;padding-left:72px;display:none;opacity:0.85;"></div>
   </div>
 
   <!-- backtest indicator bar -->
@@ -1296,7 +1296,7 @@ async function runAll(){
       var pct = ((Math.max(-1, Math.min(1, ws)) + 1) / 2 * 100).toFixed(1);
       document.getElementById('scoreBar').style.width = pct + '%';
       document.getElementById('scoreBar').style.background = color;
-      rationaleText.textContent = metaData.rationale || 'Dynamic weighting applied.';
+      rationaleText.textContent = (metaData.rationale || 'Dynamic weighting applied.').replace(/MARKET_SHOCK_OVERRIDE[:\s]*/gi, '').trim();
     } else {
       rationaleText.textContent = 'Dynamic weighting unavailable — using fixed weights.';
       updateBias();
