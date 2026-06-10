@@ -1835,6 +1835,7 @@ async function loadWeekAhead() {
 document.addEventListener('DOMContentLoaded', function() {
   loadWeekAhead();
   startPricePolling();
+  scheduleEventWatchers(); // schedule econ/earnings auto-updates
 });
 
 // ── Auto price polling ────────────────────────────────────────
@@ -1845,6 +1846,201 @@ function startPricePolling() {
   if (pricePollingTimer) clearInterval(pricePollingTimer);
   pricePollingTimer = setInterval(pollPrices, 60000); // every 60 seconds
   console.log("Price polling started (60s interval)");
+}
+
+// ── Smart econ/earnings event watchers ──────────────────────
+// Schedules a FMP poll starting at each event's release time
+// Polls every 60s until actual data appears (max 10 min)
+
+var scheduledWatchers = []; // track active watcher intervals
+
+async function scheduleEventWatchers() {
+  // Clear any existing watchers
+  scheduledWatchers.forEach(function(w) { clearInterval(w.timer); if(w.timeout) clearTimeout(w.timeout); });
+  scheduledWatchers = [];
+
+  try {
+    var res = await fetch(BASE + '/api/week-ahead');
+    var data = await res.json();
+    if (!data) return;
+
+    var now = new Date();
+    var todayET = now.toLocaleDateString('en-US', {timeZone:'America/New_York'});
+
+    // ── Schedule econ watchers ──
+    (data.econ || []).forEach(function(e) {
+      if (e.status === 'released') return; // already released
+      var eventDate = new Date(e.date + 'T12:00:00').toLocaleDateString('en-US');
+      if (eventDate !== todayET) return; // not today
+
+      // Parse release time (UTC from FMP) → ET
+      var releaseET = null;
+      if (e.time && e.time !== 'TBD') {
+        try {
+          var tp = e.time.split(':');
+          var td = new Date();
+          td.setUTCHours(parseInt(tp[0]), parseInt(tp[1]||0), 0, 0);
+          releaseET = td;
+        } catch(te) {}
+      }
+
+      if (!releaseET) return; // no time, skip
+
+      var msUntilRelease = releaseET.getTime() - Date.now();
+      var startAt = msUntilRelease < 0 ? 0 : msUntilRelease; // fire immediately if past
+
+      console.log("Econ watcher scheduled:", e.name, "fires in", Math.round(startAt/1000/60), "min");
+
+      var startTimeout = setTimeout(function() {
+        console.log("Econ watcher ACTIVE:", e.name, "— polling FMP every 60s for actual data");
+        var attempts = 0;
+        var maxAttempts = 10;
+        var watcher = { timer: null, timeout: null };
+
+        watcher.timer = setInterval(async function() {
+          attempts++;
+          try {
+            var checkRes = await fetch(BASE + '/api/week-ahead?bust=' + Date.now());
+            var checkData = await checkRes.json();
+            var updated = (checkData.econ || []).find(function(ev) {
+              return ev.name === e.name && ev.date === e.date && ev.status === 'released' && ev.actual !== null;
+            });
+            if (updated) {
+              console.log("Econ ACTUAL received:", e.name, "=", updated.actual, "— triggering econ card re-run");
+              clearInterval(watcher.timer);
+              // Re-run econ card
+              analyze('econ').then(function(result) {
+                if (!lastResults) lastResults = {};
+                lastResults.econ = result;
+                scores.econ = parseFloat(result.score) || 0;
+                setCardResult('econ', result);
+                // Re-run meta-score to update aggregate
+                fetchMetaScore();
+                // Refresh week-ahead sidebar
+                loadWeekAhead();
+                console.log("Econ card auto-updated:", e.name, result.signal);
+              }).catch(function(err) { console.log("Econ re-run error:", err.message); });
+            } else if (attempts >= maxAttempts) {
+              console.log("Econ watcher timeout:", e.name, "— FMP data not available after 10 min");
+              clearInterval(watcher.timer);
+            }
+          } catch(fetchErr) { console.log("Econ watcher fetch error:", fetchErr.message); }
+        }, 60000);
+
+        scheduledWatchers.push(watcher);
+      }, startAt);
+
+      scheduledWatchers.push({ timer: null, timeout: startTimeout });
+    });
+
+    // ── Schedule earnings watchers ──
+    (data.earnings || []).forEach(function(e) {
+      if (e.status === 'released') return;
+      var eventDate = new Date(e.date + 'T12:00:00').toLocaleDateString('en-US');
+      if (eventDate !== todayET) return;
+
+      // BMO fires at 9:35am ET, AMC fires at 4:05pm ET
+      var releaseET = new Date();
+      var etParts = now.toLocaleString('en-US', {timeZone:'America/New_York'}).split(',');
+      if (e.when === 'BMO') {
+        releaseET = new Date(now.toLocaleDateString('en-US', {timeZone:'America/New_York'}) + ' 9:35 AM');
+      } else if (e.when === 'AMC') {
+        releaseET = new Date(now.toLocaleDateString('en-US', {timeZone:'America/New_York'}) + ' 4:05 PM');
+      } else {
+        return; // TBD timing — skip
+      }
+
+      // Convert local time to ET properly
+      var etNowStr = now.toLocaleString('en-US', {timeZone:'America/New_York', hour:'2-digit', minute:'2-digit', hour12:false});
+      var msUntil = releaseET.getTime() - Date.now();
+      var startAt = msUntil < 0 ? 0 : msUntil;
+
+      console.log("Earnings watcher scheduled:", e.ticker, e.when, "fires in", Math.round(startAt/1000/60), "min");
+
+      var startTimeout = setTimeout(function() {
+        console.log("Earnings watcher ACTIVE:", e.ticker, "— polling FMP every 60s");
+        var attempts = 0;
+        var watcher = { timer: null, timeout: null };
+
+        watcher.timer = setInterval(async function() {
+          attempts++;
+          try {
+            var checkRes = await fetch(BASE + '/api/week-ahead?bust=' + Date.now());
+            var checkData = await checkRes.json();
+            var updated = (checkData.earnings || []).find(function(ev) {
+              return ev.ticker === e.ticker && ev.date === e.date && ev.status === 'released' && ev.epsActual !== null;
+            });
+            if (updated) {
+              console.log("Earnings ACTUAL received:", e.ticker, "EPS:", updated.epsActual, "— triggering earnings card re-run");
+              clearInterval(watcher.timer);
+              analyze('earn').then(function(result) {
+                if (!lastResults) lastResults = {};
+                lastResults.earn = result;
+                scores.earn = parseFloat(result.score) || 0;
+                setCardResult('earn', result);
+                fetchMetaScore();
+                loadWeekAhead();
+                console.log("Earnings card auto-updated:", e.ticker, result.signal);
+              }).catch(function(err) { console.log("Earnings re-run error:", err.message); });
+            } else if (attempts >= 10) {
+              console.log("Earnings watcher timeout:", e.ticker);
+              clearInterval(watcher.timer);
+            }
+          } catch(fetchErr) { console.log("Earnings watcher fetch error:", fetchErr.message); }
+        }, 60000);
+
+        scheduledWatchers.push(watcher);
+      }, startAt);
+
+      scheduledWatchers.push({ timer: null, timeout: startTimeout });
+    });
+
+    console.log("Event watchers scheduled:", scheduledWatchers.length, "total");
+  } catch(e) {
+    console.log("scheduleEventWatchers error:", e.message);
+  }
+}
+
+// Helper: re-run meta-score after a card auto-updates
+async function fetchMetaScore() {
+  if (!lastResults || !lastResults.econ || !lastResults.earn || !lastResults.premarket || !lastResults.news) return;
+  try {
+    var res = await fetch(BASE + '/api/meta-score', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        econ: lastResults.econ, earn: lastResults.earn,
+        premarket: lastResults.premarket, news: lastResults.news,
+        regime: lastRegime
+      })
+    });
+    var metaData = await res.json();
+    if (!metaData.weights) return;
+    lastMetaScore = metaData;
+    WEIGHTS = metaData.weights;
+    updateBias();
+    // Update weight displays
+    var sessionOpen = (function() {
+      var etN = new Date();
+      var h = parseInt(etN.toLocaleString('en-US',{hour:'2-digit',hour12:false,timeZone:'America/New_York'}));
+      var m = etN.getMinutes();
+      var d = etN.toLocaleDateString('en-US',{weekday:'short',timeZone:'America/New_York'});
+      return !['Sat','Sun'].includes(d) && (h > 9 || (h === 9 && m >= 30));
+    })();
+    ['econ','earn','premarket','news'].forEach(function(k) {
+      var wtEl = document.getElementById('wt-'+k);
+      var w = metaData.weights[k] || 1;
+      if (wtEl) wtEl.textContent = 'Weight: '+w+'×  '+Array(w+1).join('★');
+      var sc = (k === 'premarket' && sessionOpen) ? 0 : (scores[k] || 0);
+      var pts = sc * w;
+      var ptsEl = document.getElementById('pts-'+k);
+      if (ptsEl) {
+        ptsEl.textContent = (pts >= 0 ? '+' : '') + pts.toFixed(1);
+        ptsEl.className = 'card-pts ' + (pts > 0 ? 'pts-bull' : pts < 0 ? 'pts-bear' : 'pts-neu');
+      }
+    });
+    console.log("Meta-score auto-updated after card change");
+  } catch(e) { console.log("fetchMetaScore error:", e.message); }
 }
 
 async function pollPrices() {
