@@ -2443,7 +2443,7 @@ const TIER1_ECON = ["nonfarm","payroll","consumer price index","cpi","personal c
 const TIER2_ECON = ["jobless claims","initial claims","jolts","adp employment","unemployment rate","average hourly","producer price","ppi","ism manufacturing","ism services","retail sales","industrial production"];
 const ECON_EXCLUDE = ["gdpnow","nowcast","atlanta fed","cleveland fed","new york fed nowcast","sticky price","wage growth tracker","fedspeak","fed speak","treasury auction","bill auction","note auction","bond auction","redbook","nfib","baker hughes","rig count","api crude","api oil","dallas fed","richmond fed","kansas city fed","chicago pmi","national activity","abc consumer","mortgage","purchasing managers","markit"];
 
-var weekAheadCache = { data: null, fetchedAt: 0, weekKey: null };
+var weekAheadCache = { data: null, fetchedAt: 0, weekKey: null }; // reset on deploy
 
 async function fetchWeekAhead() {
   const FMP_KEY = process.env.FMP_API_KEY || "WQMcZiIIJ1rarvN3puluUNQoGXFdvkjg";
