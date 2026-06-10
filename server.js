@@ -637,13 +637,22 @@ app.post("/api/regime/reset", function(req, res) {
 });
 
 // ── Claude API ────────────────────────────────────────────────
-function callClaude(prompt, data, useWebSearch) {
+// Model routing — use Haiku for mechanical tasks, Sonnet for reasoning tasks
+const HAIKU  = "claude-haiku-4-5-20251001";
+const SONNET = "claude-sonnet-4-6";
+
+// Topics that use Haiku even with web search (mechanical extraction tasks)
+const HAIKU_TOPICS = new Set(["econ", "earn", "premarket"]);
+
+function callClaude(prompt, data, useWebSearch, topicHint) {
   return new Promise((resolve, reject) => {
     // Use ET timezone so day/date matches what traders see
     const today = new Date().toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric", timeZone:"America/New_York" });
+    // Use Haiku for mechanical extraction tasks, Sonnet for reasoning tasks
+    const useHaiku = topicHint && HAIKU_TOPICS.has(topicHint);
     const body = {
-      model: useWebSearch ? "claude-sonnet-4-6" : "claude-haiku-4-5-20251001",
-      max_tokens: useWebSearch ? 1000 : 500,  // web search needs more tokens for search results
+      model: useHaiku ? HAIKU : (useWebSearch ? SONNET : HAIKU),
+      max_tokens: useWebSearch ? 1000 : 500,
       temperature: 0,
       // ── MODIFIED: added "guidance" field to the JSON schema description ──
       system: "You are a futures trader morning briefing assistant. Today is " + today + ". CRITICAL: Reply ONLY with raw JSON, no markdown, no backticks, no explanation. Format: {\"signal\":\"bull\",\"summary\":\"2 sentence summary\",\"score\":1,\"guidance\":null} where signal is bull/bear/neutral, score is 1/-1/0, and guidance is a one-sentence forward guidance note (for earnings topics only) or null if not applicable.",
@@ -710,15 +719,15 @@ function callClaude(prompt, data, useWebSearch) {
 }
 
 // ── Rate-limit aware wrapper — retries once after 20s if rate limited ──
-async function callClaudeWithRetry(prompt, data, useWebSearch) {
+async function callClaudeWithRetry(prompt, data, useWebSearch, topicHint) {
   try {
-    return await callClaude(prompt, data, useWebSearch);
+    return await callClaude(prompt, data, useWebSearch, topicHint);
   } catch(e) {
     if (e.message && e.message.includes("rate limit")) {
       console.log("Rate limit hit — waiting 20s before retry...");
       await new Promise(r => setTimeout(r, 20000));
       try {
-        return await callClaude(prompt, data, useWebSearch);
+        return await callClaude(prompt, data, useWebSearch, topicHint);
       } catch(e2) {
         console.error("Retry also failed:", e2.message);
         throw e2;
@@ -1100,7 +1109,7 @@ app.post("/api/analyze", async function(req, res) {
 
     // Track last Sonnet web search time for rate limit management
     if (useSearch) global.lastSonnetCallMs = Date.now();
-    const result = await callClaudeWithRetry(prompt, rawData, useSearch);
+    const result = await callClaudeWithRetry(prompt, rawData, useSearch, 2, topic);
     console.log("Result for " + topic + ":", JSON.stringify(result));
 
     // Cache premarket result if US session is now open (lock it for the rest of the day)
@@ -2708,11 +2717,11 @@ async function runScheduledAnalysis() {
 
     // ── Step 2: Analyze each card ──
     const [econ, earn, premarket, news] = await Promise.allSettled([
-      callClaudeWithRetry(econPrompt, rawEcon || "No data", false),
-      callClaudeWithRetry(EARN_PROMPT, rawEarn || "No data", true),
-      rawPre ? callClaudeWithRetry(PREMARKET_PROMPT, rawPre, false)
-             : callClaudeWithRetry(PREMARKET_PROMPT, "No premarket data", true),
-      callClaudeWithRetry(NEWS_PROMPT + " IMPORTANT: Use web search to supplement CNBC data. Search for \'market moving news today\'.", rawNews || "No data", true)
+      callClaudeWithRetry(econPrompt, rawEcon || "No data", false, "econ"),
+      callClaudeWithRetry(EARN_PROMPT, rawEarn || "No data", true, "earn"),
+      rawPre ? callClaudeWithRetry(PREMARKET_PROMPT, rawPre, false, "premarket")
+             : callClaudeWithRetry(PREMARKET_PROMPT, "No premarket data", true, "premarket"),
+      callClaudeWithRetry(NEWS_PROMPT + " IMPORTANT: Use web search to supplement CNBC data. Search for \'market moving news today\'.", rawNews || "No data", true, "news")
     ]);
 
     const results = {
