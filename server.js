@@ -2650,23 +2650,31 @@ function getETNow() {
 }
 
 function msUntilNextSchedule() {
-  const et = getETNow();
-  const day = et.getDay(); // 0=Sun, 6=Sat
-  if (day === 0 || day === 6) return null; // no weekend runs
+  const etNow = getETNow();
+  const day = etNow.getDay();
+  if (day === 0 || day === 6) return null;
 
-  const todayTimes = SCHEDULE_TIMES.map(([h, m]) => {
-    const t = new Date(et);
-    t.setHours(h, m, 0, 0);
-    return t;
-  });
+  // Build scheduled times as proper ET Date objects using UTC offset
+  // getETNow() returns a Date whose .getHours() etc reflect ET time
+  const nowMs = Date.now();
 
-  // Find next time that hasn't passed yet
-  const future = todayTimes.filter(t => t > et);
-  if (future.length === 0) return null; // all passed today
+  const futureTimes = SCHEDULE_TIMES
+    .map(([h, m]) => {
+      // Create a new ET "today" at h:m
+      const t = new Date(etNow);
+      t.setHours(h, m, 0, 0);
+      // ms from now = t (in ET local time) - etNow (in ET local time) converted to real ms
+      const diffMs = t.getTime() - etNow.getTime();
+      return { label: (h < 12 ? h : h-12) + ":" + String(m).padStart(2,"0") + (h < 12 ? " AM" : " PM"), diffMs };
+    })
+    .filter(t => t.diffMs > 60000); // must be more than 1 minute in the future
 
-  const next = future[0];
-  schedulerNextRun = next.toLocaleTimeString("en-US", { hour:"2-digit", minute:"2-digit", hour12:true });
-  return next.getTime() - Date.now();
+  if (futureTimes.length === 0) return null;
+
+  const next = futureTimes[0];
+  schedulerNextRun = next.label + " ET";
+  console.log("Scheduler: next scheduled slot in", Math.round(next.diffMs/1000/60), "min (" + next.label + " ET)");
+  return next.diffMs;
 }
 
 var schedulerRunning = false; // lock to prevent duplicate runs
