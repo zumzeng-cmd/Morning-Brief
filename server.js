@@ -2762,12 +2762,23 @@ async function runScheduledAnalysis() {
                         neutral:"MIXED / NEUTRAL", mildly_bear:"MILDLY BEARISH", bear:"BEARISH", strongly_bear:"STRONGLY BEARISH" }[signal];
     const metaScore = { weights, weightedScore, signal, biasLabel, rationale: metaRaw.rationale||"" };
 
-    // ── Step 4: Save to history ──
-    const etDateKey = getETNow().toISOString().slice(0,10);
-    const snapshot = { results, metaScore, regime: activeRegime, runAt: new Date().toISOString(), autoRun: true };
-    const history = loadHistory();
-    history[etDateKey] = snapshot;
-    saveHistory(history);
+    // ── Step 4: Validate before saving ──
+    // Only save if at least 3 of 4 cards have real summaries (not error states)
+    const validCards = Object.values(results).filter(r =>
+      r && r.summary && !r.summary.includes("Error") && r.summary.length > 20
+    ).length;
+
+    if (validCards < 3) {
+      console.log("Scheduler: only", validCards, "/4 cards valid — NOT saving to history (partial run)");
+      schedulerLog[0].status = "partial — not saved (" + validCards + "/4 cards)";
+    } else {
+      const etDateKey = getETNow().toLocaleDateString('en-CA', {timeZone:'America/New_York'});
+      const snapshot = { results, metaScore, regime: activeRegime, runAt: new Date().toISOString(), autoRun: true };
+      const history = loadHistory();
+      history[etDateKey] = snapshot;
+      saveHistory(history);
+      console.log("Scheduler: saved to history key:", etDateKey, "(", validCards, "/4 cards valid)");
+    }
 
     schedulerLog[0].status = "complete";
     schedulerLog[0].bias = biasLabel;
