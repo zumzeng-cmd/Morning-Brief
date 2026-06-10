@@ -807,7 +807,7 @@ const EARN_PROMPT = [
   "MAJOR COMPANIES (score these if they reported): NVDA, AAPL, MSFT, META, GOOGL, AMZN, TSLA, AVGO, NFLX, AMD, QCOM, JPM, GS, BAC, MS, XOM, CVX, LLY, UNH, COST, WMT, ORCL, CRM, ADBE, MU, NOW, V, MA.",
   "DATA SOURCE: non-GAAP adjusted EPS vs analyst estimates.",
   "ONLY score CONFIRMED actual EPS results. If all TBD, score 0 neutral.",
-  "SUMMARY FORMAT: If a major watchlist company is SCHEDULED to report TODAY (even if results are TBD) — acknowledge it directly: '[Company] reports [BMO/AMC] today — results pending.' Do NOT say 'no major earnings today' if a watchlist company is on today's calendar, even if the actual hasn't printed yet.",
+  "SUMMARY FORMAT: If a major watchlist company is SCHEDULED to report TODAY (even if results are TBD) — acknowledge it directly: '[Company] reports [BMO/AMC] today — results pending.' Do NOT say 'no major earnings today' if a watchlist company is on today's calendar, even if the actual hasn't printed yet. Do NOT say 'No confirmed actuals from watchlist companies available for scoring within the staleness window' — this is technical jargon, keep it conversational.",
   "If NO watchlist company reports today or tomorrow — write: 'No major earnings today. Next up: [Company] reports [day] [BMO/AMC].' Score 0 neutral.",
   "If earnings DID release with confirmed actuals — state results in plain English: '[Company] beat EPS by X%, revenue [beat/missed], guidance [raised/lowered/reaffirmed] — [bullish/bearish] for [NQ/sector].' Include guidance as it often matters more than the beat.",
   "Score: bull=1, bear=-1, neutral=0. Use 0.5 increments when guidance changes the picture.",
@@ -2527,16 +2527,14 @@ async function fetchWeekAhead() {
           const time = e.time || (e.when === "bmo" ? "BMO" : e.when === "amc" ? "AMC" : "TBD");
           // FMP uses various formats: "bmo"/"amc", "before market open"/"after market close", time-based
           const whenRaw = ((e.time || e.when || e.reportTime || "")).toLowerCase();
-          let when = "TBD";
+          let when = "AMC"; // Default to AMC — majority of major earnings report after close
           if (whenRaw.includes("bmo") || whenRaw.includes("before market") || whenRaw.includes("pre market") || whenRaw.includes("premarket")) {
             when = "BMO";
-          } else if (whenRaw.includes("amc") || whenRaw.includes("after market") || whenRaw.includes("after close") || whenRaw.includes("post market")) {
-            when = "AMC";
+          } else if (whenRaw.includes("amc") || whenRaw.includes("after market") || whenRaw.includes("after close") || whenRaw.includes("post market") || whenRaw === "" || whenRaw === "tbd" || whenRaw === "n/a") {
+            when = "AMC"; // explicit AMC or unknown = default AMC
           } else if (whenRaw.match(/^\d{2}:\d{2}$/)) {
-            // Time-based: before 12:00 = BMO, after 16:00 = AMC
             const hour = parseInt(whenRaw.split(":")[0]);
-            if (hour < 12) when = "BMO";
-            else if (hour >= 16) when = "AMC";
+            when = hour < 12 ? "BMO" : "AMC";
           }
           const epsActual = e.eps !== null && e.eps !== undefined ? parseFloat(e.eps) : null;
           const epsEst = e.epsEstimated !== null && e.epsEstimated !== undefined ? parseFloat(e.epsEstimated) : null;
