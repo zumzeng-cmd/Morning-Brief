@@ -452,6 +452,12 @@ body.sidebar-collapsed .sidebar-toggle { left: 20px; }
     <div style="margin-left:12px;display:flex;align-items:center;gap:8px;">
       <input type="date" id="datePicker" style="display:none;background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:11px;padding:4px 8px;border-radius:3px;outline:none;" onchange="loadDate(this.value)"/>
       <button class="dnbtn" id="btnHist" onclick="switchToHistory()">HISTORY</button>
+    <button id="autoToggle" onclick="toggleAutoRun()" title="Auto-analysis scheduler"
+      style="background:transparent;border:1px solid var(--border);color:var(--muted);
+      padding:4px 10px;border-radius:3px;cursor:pointer;font-size:10px;letter-spacing:0.05em;
+      font-family:var(--font-mono);transition:all 0.2s;margin-left:4px;">
+      AUTO: OFF
+    </button>
     <button id="themeToggle" onclick="toggleTheme()" title="Toggle light/dark mode"
       style="background:transparent;border:1px solid var(--border);color:var(--muted);
       padding:4px 10px;border-radius:3px;cursor:pointer;font-size:11px;letter-spacing:0.05em;
@@ -952,6 +958,7 @@ async function runAll(){
   window.marketShockActive=false;
   const btn=document.getElementById('runBtn');
   btn.disabled=true;btn.textContent='⧖ ANALYZING...';
+  window.analysisRunning = true; // prevent event watchers from firing during manual run
   document.getElementById('footerNote').textContent='Fetching live data from FMP, Finnhub & CNBC...';
   const keys=['econ','earn','premarket','news'];
   // ── Hard reset ALL data before new analysis ──
@@ -1269,6 +1276,7 @@ async function runAll(){
 
   running=false;
   btn.disabled=false;btn.textContent='↺ REFRESH ANALYSIS';
+  window.analysisRunning = false;
   document.getElementById('footerNote').textContent='Last run: '+new Date().toLocaleTimeString()+' · Auto-saved to history';
 
   // ── Auto-load markets + summary in background after analysis completes ──
@@ -1652,6 +1660,86 @@ function setCardConfidence(key, confidence) {
   }
 }
 
+// ── Auto-run scheduler toggle ─────────────────────────────────
+var autoRunEnabled = false;
+
+async function toggleAutoRun() {
+  try {
+    var res = await fetch(BASE + '/api/scheduler/toggle', { method:'POST' });
+    var data = await res.json();
+    autoRunEnabled = data.enabled;
+    var btn = document.getElementById('autoToggle');
+    if (btn) {
+      btn.textContent = 'AUTO: ' + (autoRunEnabled ? 'ON' : 'OFF');
+      btn.style.borderColor  = autoRunEnabled ? 'var(--accent)' : 'var(--border)';
+      btn.style.color        = autoRunEnabled ? 'var(--accent)' : 'var(--muted)';
+    }
+    if (data.nextRun) console.log("Auto-run next scheduled:", data.nextRun);
+  } catch(e) { console.log("Scheduler toggle error:", e.message); }
+}
+
+async function checkSchedulerStatus() {
+  try {
+    var res = await fetch(BASE + '/api/scheduler/status');
+    var data = await res.json();
+    autoRunEnabled = data.enabled;
+    var btn = document.getElementById('autoToggle');
+    if (btn) {
+      btn.textContent = 'AUTO: ' + (autoRunEnabled ? 'ON' : 'OFF');
+      btn.style.borderColor  = autoRunEnabled ? 'var(--accent)' : 'var(--border)';
+      btn.style.color        = autoRunEnabled ? 'var(--accent)' : 'var(--muted)';
+    }
+  } catch(e) {}
+}
+
+// ── Auto-load today's history on page open ────────────────────
+async function autoLoadToday() {
+  try {
+    var today = todayKey();
+    var res = await fetch(BASE + '/api/history/' + today);
+    if (!res.ok) return; // no history for today
+    var entry = await res.json();
+    if (!entry || !entry.results) return;
+
+    // Restore all card results
+    var r = entry.results;
+    if (r.econ)      { lastResults.econ      = r.econ;      scores.econ      = parseFloat(r.econ.score)||0;      setCardResult('econ',      r.econ); }
+    if (r.earn)      { lastResults.earn      = r.earn;      scores.earn      = parseFloat(r.earn.score)||0;      setCardResult('earn',      r.earn); }
+    if (r.premarket) { lastResults.premarket = r.premarket; scores.premarket = parseFloat(r.premarket.score)||0; setCardResult('premarket', r.premarket); }
+    if (r.news)      { lastResults.news      = r.news;      scores.news      = parseFloat(r.news.score)||0;      setCardResult('news',      r.news); }
+
+    // Restore meta-score
+    if (entry.metaScore) {
+      lastMetaScore = entry.metaScore;
+      WEIGHTS = entry.metaScore.weights || WEIGHTS;
+      updateBias();
+      var rb = document.getElementById('rationaleBox');
+      var rt = document.getElementById('rationaleText');
+      if (rb) rb.style.display = 'flex';
+      if (rt) rt.textContent = entry.metaScore.rationale || '';
+    }
+
+    // Restore regime
+    if (entry.regime) {
+      lastRegime = entry.regime;
+      var reg = document.getElementById('regimeBar');
+      if (reg) reg.style.display = 'flex';
+      updateRegimeBar(entry.regime);
+    }
+
+    // Update footer
+    var fn = document.getElementById('footerNote');
+    if (fn) {
+      var runAt = entry.results.econ && entry.runAt ? new Date(entry.runAt).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true}) : '';
+      fn.textContent = 'Last run: ' + runAt + (entry.autoRun ? ' · Auto-run' : ' · Auto-saved to history');
+    }
+
+    console.log("Today's analysis auto-loaded from history (" + today + ")");
+  } catch(e) {
+    console.log("Auto-load error:", e.message);
+  }
+}
+
 function toggleTheme(){
   var isLight = document.body.classList.toggle('light-mode');
   document.getElementById('themeToggle').textContent = isLight ? '☽' : '☀';
@@ -1835,7 +1923,9 @@ async function loadWeekAhead() {
 document.addEventListener('DOMContentLoaded', function() {
   loadWeekAhead();
   startPricePolling();
-  scheduleEventWatchers(); // schedule econ/earnings auto-updates
+  scheduleEventWatchers();
+  checkSchedulerStatus();
+  autoLoadToday(); // load today's stored analysis if available
 });
 
 // ── Auto price polling ────────────────────────────────────────
@@ -1908,7 +1998,8 @@ async function scheduleEventWatchers() {
             if (updated) {
               console.log("Econ ACTUAL received:", e.name, "=", updated.actual, "— triggering econ card re-run");
               clearInterval(watcher.timer);
-              // Re-run econ card
+              // Skip if manual analysis is already running
+              if (window.analysisRunning) { console.log("Econ watcher: analysis running, skipping auto-update"); return; }
               analyze('econ').then(function(result) {
                 if (!lastResults) lastResults = {};
                 lastResults.econ = result;
@@ -1973,6 +2064,7 @@ async function scheduleEventWatchers() {
             if (updated) {
               console.log("Earnings ACTUAL received:", e.ticker, "EPS:", updated.epsActual, "— triggering earnings card re-run");
               clearInterval(watcher.timer);
+              if (window.analysisRunning) { console.log("Earnings watcher: analysis running, skipping auto-update"); return; }
               analyze('earn').then(function(result) {
                 if (!lastResults) lastResults = {};
                 lastResults.earn = result;
