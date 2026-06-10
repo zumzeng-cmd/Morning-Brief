@@ -620,7 +620,8 @@ function updateClock(){
 updateClock();setInterval(updateClock,1000);
 
 function todayKey(){
-  return new Date().toISOString().slice(0,10);
+  // Use ET timezone to match server-side date keys
+  return new Date().toLocaleDateString('en-CA', {timeZone:'America/New_York'}); // en-CA gives YYYY-MM-DD format
 }
 
 // mode switching
@@ -1696,10 +1697,18 @@ async function checkSchedulerStatus() {
 async function autoLoadToday() {
   try {
     var today = todayKey();
+    console.log("Auto-load: checking history for", today);
     var res = await fetch(BASE + '/api/history/' + today);
-    if (!res.ok) return; // no history for today
+    if (!res.ok) {
+      console.log("Auto-load: no history for", today, "(status", res.status + ")");
+      return;
+    }
     var entry = await res.json();
-    if (!entry || !entry.results) return;
+    if (!entry || !entry.results) {
+      console.log("Auto-load: history exists but no results");
+      return;
+    }
+    console.log("Auto-load: found history for", today, "— restoring...");
 
     // Restore all card results
     var r = entry.results;
