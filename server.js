@@ -2794,29 +2794,51 @@ async function runScheduledAnalysis() {
     console.log("Scheduler: lock released");
   }
 
-  // Schedule next run
+  // Schedule next run (timer singleton prevents duplicates)
   scheduleNextRun();
 }
 
+var scheduleNextRunTimer = null; // prevent multiple timers
+
 function scheduleNextRun() {
+  // Clear any existing timer to prevent duplicates
+  if (scheduleNextRunTimer) {
+    clearTimeout(scheduleNextRunTimer);
+    scheduleNextRunTimer = null;
+  }
+
   const ms = msUntilNextSchedule();
+
   if (ms === null) {
-    console.log("Scheduler: no more runs today — next run tomorrow at 7:30am ET");
-    // Check again at midnight ET
-    const et = getETNow();
-    const midnight = new Date(et);
-    midnight.setDate(midnight.getDate() + 1);
-    midnight.setHours(0, 5, 0, 0);
-    const msToMidnight = midnight.getTime() - Date.now();
-    setTimeout(scheduleNextRun, msToMidnight);
+    // All times passed today — schedule check for tomorrow 7:25am ET
+    const etNow = getETNow();
+    const tomorrow = new Date(etNow);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(7, 25, 0, 0); // 7:25am ET tomorrow
+
+    // Calculate ms from NOW (Date.now()) to tomorrow 7:25am ET
+    // Convert ET time back to UTC for comparison
+    const tomorrowUTC = new Date(tomorrow.toLocaleString("en-US", {timeZone:"UTC"}));
+    const etOffset = etNow.getTime() - new Date(etNow.toLocaleString("en-US", {timeZone:"UTC"})).getTime();
+    const msToTomorrow = tomorrow.getTime() + etOffset - Date.now();
+
+    // Safety: never set a timer less than 1 minute to avoid rapid loops
+    const safeMs = Math.max(msToTomorrow, 60000);
+    console.log("Scheduler: no more runs today — next check in", Math.round(safeMs/1000/60), "min");
+    scheduleNextRunTimer = setTimeout(scheduleNextRun, safeMs);
     return;
   }
-  const nextET = new Date(Date.now() + ms);
-  console.log("Scheduler: next run at", nextET.toLocaleTimeString("en-US", {timeZone:"America/New_York"}), "ET (in", Math.round(ms/1000/60), "min)");
-  setTimeout(function() {
+
+  // Safety: never fire in less than 30 seconds
+  const safeMs = Math.max(ms, 30000);
+  const nextET = new Date(Date.now() + safeMs);
+  console.log("Scheduler: next run at", nextET.toLocaleTimeString("en-US", {timeZone:"America/New_York"}), "ET (in", Math.round(safeMs/1000/60), "min)");
+
+  scheduleNextRunTimer = setTimeout(function() {
+    scheduleNextRunTimer = null;
     if (schedulerEnabled) runScheduledAnalysis();
-    else scheduleNextRun(); // keep scheduling even when disabled, so toggle turns it on instantly
-  }, ms);
+    else scheduleNextRun();
+  }, safeMs);
 }
 
 // Toggle endpoint
