@@ -807,8 +807,9 @@ const EARN_PROMPT = [
   "MAJOR COMPANIES (score these if they reported): NVDA, AAPL, MSFT, META, GOOGL, AMZN, TSLA, AVGO, NFLX, AMD, QCOM, JPM, GS, BAC, MS, XOM, CVX, LLY, UNH, COST, WMT, ORCL, CRM, ADBE, MU, NOW, V, MA.",
   "DATA SOURCE: non-GAAP adjusted EPS vs analyst estimates.",
   "ONLY score CONFIRMED actual EPS results. If all TBD, score 0 neutral.",
-  "SUMMARY FORMAT: If no major companies reported today — write: 'No major earnings today.' Then add one sentence: 'Next up: [Company] reports [day] [BMO/AMC].' Score 0 neutral. Keep it conversational.",
-  "If earnings DID release — state results in plain English: '[Company] beat EPS by X%, revenue [beat/missed], guidance [raised/lowered/reaffirmed] — [bullish/bearish] for [NQ/sector].' Include guidance as it often matters more than the beat.",
+  "SUMMARY FORMAT: If a major watchlist company is SCHEDULED to report TODAY (even if results are TBD) — acknowledge it directly: '[Company] reports [BMO/AMC] today — results pending.' Do NOT say 'no major earnings today' if a watchlist company is on today's calendar, even if the actual hasn't printed yet.",
+  "If NO watchlist company reports today or tomorrow — write: 'No major earnings today. Next up: [Company] reports [day] [BMO/AMC].' Score 0 neutral.",
+  "If earnings DID release with confirmed actuals — state results in plain English: '[Company] beat EPS by X%, revenue [beat/missed], guidance [raised/lowered/reaffirmed] — [bullish/bearish] for [NQ/sector].' Include guidance as it often matters more than the beat.",
   "Score: bull=1, bear=-1, neutral=0. Use 0.5 increments when guidance changes the picture.",
   // ── MODIFIED: tightened staleness rule — stale reports omitted entirely ──
   "STALENESS RULE: Reports are scored ONLY within a strict time window. [TODAY] BMO (before market open) reports: score only if current time is before 10:00am ET. [TODAY] AMC (after market close) reports: score only after 4:00pm ET on that day. [YEST] reports: score ONLY if current time is before 10:00am ET on the NEXT trading day — i.e. the morning after they reported. If current time is past 10:00am ET, [YEST] reports are fully priced in and MUST be completely ignored — set score to 0 and do not mention them. CRITICAL: A report from 2, 3, 4 or more days ago (e.g. AVGO reported June 3 and today is June 8) is ANCIENT — it is NOT [YEST], it has zero scoring weight, and must not appear in your analysis under any circumstances. Only reports from TODAY or genuinely YESTERDAY count. If no valid in-window reports exist, score 0 neutral and state that no scoreable earnings exist today.",
@@ -859,7 +860,7 @@ const PREMARKET_PROMPT = [
   "SHOCK AFTERMATH RULE: If a military/emergency shock occurred in the prior session, overnight futures must be clearly positive (>0.5%) AND have a clear reason (ceasefire, deal confirmed, resolution) to score BULL. Otherwise NEUTRAL.",
   "",
   "SUMMARY: Two sentences.",
-  "Sentence 1: Asia X/5 bullish [list which ones up/down with %], Europe X/5 bullish [list], US futures NQ/ES [%].",
+  "Sentence 1: Lead with the DOMINANT direction — if 4/5 Asia markets are DOWN, say 'Asia 4/5 bearish' not '1/5 bullish'. List the majority direction first with names and %, then note the outlier. Same rule for Europe. Example: 'Asia 4/5 bearish [Nikkei -2%, HSI -1%, Shanghai -0.4%, STI -1.2% DOWN; ASX +0.6% only outlier], Europe 3/5 bearish [DAX -1%, CAC -0.5%, STOXX -0.1% DOWN; FTSE +0.3%, AEX mixed], US futures NQ -1%, ES -0.5%.'",
   "Sentence 2: The dominant driver including timeline context — what happened in what order and what it means for today's open.",
   "Score: bull=1, bear=-1, neutral=0.",
   "JSON SCHEMA: {\"signal\":\"bull|bear|neutral\",\"summary\":\"2 sentence summary\",\"score\":1,\"guidance\":null}"
@@ -2524,7 +2525,19 @@ async function fetchWeekAhead() {
           if (!WATCH_TICKERS.has(ticker)) return;
           const date = (e.date || "").slice(0,10);
           const time = e.time || (e.when === "bmo" ? "BMO" : e.when === "amc" ? "AMC" : "TBD");
-          const when = (e.time || e.when || "").toLowerCase().includes("bmo") ? "BMO" : (e.time || e.when || "").toLowerCase().includes("amc") ? "AMC" : "TBD";
+          // FMP uses various formats: "bmo"/"amc", "before market open"/"after market close", time-based
+          const whenRaw = ((e.time || e.when || e.reportTime || "")).toLowerCase();
+          let when = "TBD";
+          if (whenRaw.includes("bmo") || whenRaw.includes("before market") || whenRaw.includes("pre market") || whenRaw.includes("premarket")) {
+            when = "BMO";
+          } else if (whenRaw.includes("amc") || whenRaw.includes("after market") || whenRaw.includes("after close") || whenRaw.includes("post market")) {
+            when = "AMC";
+          } else if (whenRaw.match(/^\d{2}:\d{2}$/)) {
+            // Time-based: before 12:00 = BMO, after 16:00 = AMC
+            const hour = parseInt(whenRaw.split(":")[0]);
+            if (hour < 12) when = "BMO";
+            else if (hour >= 16) when = "AMC";
+          }
           const epsActual = e.eps !== null && e.eps !== undefined ? parseFloat(e.eps) : null;
           const epsEst = e.epsEstimated !== null && e.epsEstimated !== undefined ? parseFloat(e.epsEstimated) : null;
           const revActual = e.revenue !== null && e.revenue !== undefined ? parseFloat(e.revenue) : null;
