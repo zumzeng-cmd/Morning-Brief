@@ -317,7 +317,7 @@ async function fetchPremarket() {
 
   // ── PRIMARY: Use TradingView cache if fresh ──
   // TV webhook provides actual live prices for all indices — far better than web search
-  if (tvPriceCache.isFresh(600)) { // fresh within 10 minutes
+  if (tvPriceCache.isFresh(1800)) { // fresh within 30 minutes
     const asia = tvPriceCache.asia;
     const europe = tvPriceCache.europe;
     const futures = tvPriceCache.futures;
@@ -361,9 +361,19 @@ async function fetchPremarket() {
     return tvData;
   }
 
+  // If TV cache exists but is stale, still use it with a staleness note
+  if (tvPriceCache.receivedAt) {
+    console.log("Premarket: TV cache stale (" + tvPriceCache.ageSeconds() + "s) — using stale data with note");
+    // Build data string same as fresh path but note the age
+    const asia = tvPriceCache.asia; const europe = tvPriceCache.europe; const futures = tvPriceCache.futures;
+    const ageMin = Math.round(tvPriceCache.ageSeconds() / 60);
+    const asiaLines = Object.entries(asia).map(([k,v]) => k+": "+(v.pct>=0?"+":"")+v.pct+"% ("+(v.pct>=0?"UP":"DOWN")+")");
+    const euroLines = Object.entries(europe).map(([k,v]) => k+": "+(v.pct>=0?"+":"")+v.pct+"% ("+(v.pct>=0?"UP":"DOWN")+")");
+    const futLines = ["NQ: "+(futures.NQ?(futures.NQ.pct>=0?"+":"")+futures.NQ.pct+"%":"N/A"), "ES: "+(futures.ES?(futures.ES.pct>=0?"+":"")+futures.ES.pct+"%":"N/A"), "YM: "+(futures.YM?(futures.YM.pct>=0?"+":"")+futures.YM.pct+"%":"N/A"), "RTY: "+(futures.RTY?(futures.RTY.pct>=0?"+":"")+futures.RTY.pct+"%":"N/A")];
+    return ["MARKET DATA (TradingView, "+ageMin+" min old — last available):", "", "ASIA:", ...asiaLines, "", "EUROPE:", ...euroLines, "", "US FUTURES:", ...futLines].join("\n");
+  }
+
   // Any weekday before 9:30am ET — ETF proxies don't trade yet so they return stale data
-  // Asian markets have already closed, European markets are open but US ETFs haven't opened
-  // Use web search for real overnight data on ALL weekday pre-market windows
   const isWeekdayPreOpen = dayOfWeek >= 1 && dayOfWeek <= 5 &&
     (hourET < 9 || (hourET === 9 && minuteET < 30));
   if (isWeekdayPreOpen) {
@@ -2631,7 +2641,7 @@ app.get("/api/tv-prices", function(req, res) {
 // Runs full analysis automatically at scheduled times ET
 // Toggle via POST /api/scheduler/toggle or GET /api/scheduler/status
 
-var schedulerEnabled    = false;
+var schedulerEnabled    = true; // ON by default
 var schedulerLastRun    = null;
 var schedulerNextRun    = null;
 var schedulerLog        = [];
