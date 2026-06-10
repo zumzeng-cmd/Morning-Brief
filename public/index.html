@@ -2171,30 +2171,8 @@ async function pollPrices() {
       refreshLivePrices();
     }
 
-    // Update pre-market card if on Today tab and analysis has run
-    var currentTab = document.querySelector('.dnbtn.active');
-    var isToday = currentTab && currentTab.id === 'btnToday';
-    if (isToday && lastResults && lastResults.premarket) {
-      // Re-fetch premarket with fresh TV data
-      var etNow = new Date();
-      var etHour = parseInt(etNow.toLocaleString('en-US',{hour:'2-digit',hour12:false,timeZone:'America/New_York'}));
-      var etMin  = etNow.getMinutes();
-      var etDay  = etNow.toLocaleDateString('en-US',{weekday:'short',timeZone:'America/New_York'});
-      var sessionOpen = !['Sat','Sun'].includes(etDay) && (etHour > 9 || (etHour === 9 && etMin >= 30));
-      // Only auto-refresh pre-market if session not yet open (pre-open conditions changing)
-      if (!sessionOpen) {
-        analyze('premarket').then(function(result) {
-          if (!lastResults) lastResults = {};
-          lastResults.premarket = result;
-          scores.premarket = parseFloat(result.score) || 0;
-          setCardResult('premarket', result);
-          updateBias();
-          console.log("Pre-market card auto-updated from TV prices");
-        }).catch(function(e) {
-          console.log("Pre-market auto-update error:", e.message);
-        });
-      }
-    }
+    // Pre-market card auto-update removed from price polling — too expensive
+    // Pre-market re-runs via scheduled auto-analysis or manual refresh only
   } catch(e) {
     console.log("Price poll error:", e.message);
   }
