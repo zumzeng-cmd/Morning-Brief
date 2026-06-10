@@ -2616,6 +2616,217 @@ app.get("/api/tv-prices", function(req, res) {
   });
 });
 
+
+// ── Auto-Analysis Scheduler ───────────────────────────────────
+// Runs full analysis automatically at scheduled times ET
+// Toggle via POST /api/scheduler/toggle or GET /api/scheduler/status
+
+var schedulerEnabled = false; // off by default — toggle via UI
+var schedulerLastRun  = null;
+var schedulerNextRun  = null;
+var schedulerLog      = [];
+
+// Scheduled run times in ET (24h format): [hour, minute]
+const SCHEDULE_TIMES = [
+  [7,  30],  // 7:30am  — pre-market, overnight data available
+  [8,  35],  // 8:35am  — after most econ releases (8:30am ET)
+  [9,  35],  // 9:35am  — post-open, US session confirmed
+  [14,  0],  // 2:00pm  — mid-session update
+  [16,  5],  // 4:05pm  — post-close, AMC earnings window
+];
+
+function getETNow() {
+  return new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
+}
+
+function msUntilNextSchedule() {
+  const et = getETNow();
+  const day = et.getDay(); // 0=Sun, 6=Sat
+  if (day === 0 || day === 6) return null; // no weekend runs
+
+  const todayTimes = SCHEDULE_TIMES.map(([h, m]) => {
+    const t = new Date(et);
+    t.setHours(h, m, 0, 0);
+    return t;
+  });
+
+  // Find next time that hasn't passed yet
+  const future = todayTimes.filter(t => t > et);
+  if (future.length === 0) return null; // all passed today
+
+  const next = future[0];
+  schedulerNextRun = next.toLocaleTimeString("en-US", { hour:"2-digit", minute:"2-digit", hour12:true });
+  return next.getTime() - Date.now();
+}
+
+var schedulerRunning = false; // lock to prevent duplicate runs
+
+async function runScheduledAnalysis() {
+  if (!schedulerEnabled) return;
+  const et = getETNow();
+  const day = et.getDay();
+  if (day === 0 || day === 6) return; // skip weekends
+
+  // ── Duplicate run prevention ──
+  if (schedulerRunning) {
+    console.log("Scheduler: already running — skipping duplicate trigger");
+    return;
+  }
+  schedulerRunning = true;
+
+  console.log("Scheduler: running auto-analysis at", et.toLocaleTimeString("en-US", {timeZone:"America/New_York"}));
+  schedulerLastRun = new Date().toISOString();
+  schedulerLog.unshift({ time: schedulerLastRun, status: "running" });
+  if (schedulerLog.length > 10) schedulerLog.pop();
+
+  try {
+    // ── Step 1: Run all 4 cards ──
+    const [econData, earnData, preData, newsData] = await Promise.allSettled([
+      fetchEconFMP(),
+      fetchEarnings(),
+      fetchPremarket(),
+      fetchNews()
+    ]);
+
+    const rawEcon = econData.status === "fulfilled" ? econData.value : null;
+    const rawEarn = earnData.status === "fulfilled" ? earnData.value : null;
+    const rawPre  = preData.status  === "fulfilled" ? preData.value  : null;
+    const rawNews = newsData.status === "fulfilled" ? newsData.value : null;
+
+    // Detect active regime
+    const activeRegime = regimeCache;
+
+    // Build prompts
+    const econPrompt = ECON_PROMPT.replace("REGIME_PLACEHOLDER", activeRegime ?
+      "REGIME: " + activeRegime.regime + " — " + ({
+        "GNISBN":"Good News Is Bad News — strong data delays cuts, bearish equities",
+        "GNISGN":"Good News Is Good News — strong data = growth, bullish equities",
+        "BNISBN":"Bad News Is Bad News — weak data = recession fears, bearish",
+        "BNISGNBN":"Bad News Is Good News — weak data = cuts coming, bullish"
+      }[activeRegime.regime]||"") : "");
+
+    // ── Step 2: Analyze each card ──
+    const [econ, earn, premarket, news] = await Promise.allSettled([
+      callClaudeWithRetry(econPrompt, rawEcon || "No data", false),
+      callClaudeWithRetry(EARN_PROMPT, rawEarn || "No data", true),
+      rawPre ? callClaudeWithRetry(PREMARKET_PROMPT, rawPre, false)
+             : callClaudeWithRetry(PREMARKET_PROMPT, "No premarket data", true),
+      callClaudeWithRetry(NEWS_PROMPT + " IMPORTANT: Use web search to supplement CNBC data. Search for \'market moving news today\'.", rawNews || "No data", true)
+    ]);
+
+    const results = {
+      econ:      econ.status      === "fulfilled" ? econ.value      : { signal:"neutral", score:0, summary:"Error" },
+      earn:      earn.status      === "fulfilled" ? earn.value      : { signal:"neutral", score:0, summary:"Error" },
+      premarket: premarket.status === "fulfilled" ? premarket.value : { signal:"neutral", score:0, summary:"Error" },
+      news:      news.status      === "fulfilled" ? news.value      : { signal:"neutral", score:0, summary:"Error" }
+    };
+
+    // ── Step 3: Meta-score ──
+    const metaPrompt = META_PROMPT;
+    const metaCtx = [
+      "SIGNAL 1 — ECON CALENDAR: " + results.econ.signal.toUpperCase() + " | " + results.econ.summary,
+      "SIGNAL 2 — EARNINGS: " + results.earn.signal.toUpperCase() + " | " + results.earn.summary,
+      "SIGNAL 3 — PRE/POST-MARKET: " + results.premarket.signal.toUpperCase() + " | " + results.premarket.summary,
+      "SIGNAL 4 — MARKET NEWS: " + results.news.signal.toUpperCase() + " | " + results.news.summary,
+    ].join("\n");
+
+    const metaRaw = await callClaudeWithRetry(metaPrompt, metaCtx, false);
+    const weights = metaRaw.weights || { econ:1, earn:1, premarket:1, news:2 };
+
+    // Apply server-side caps
+    const etNowMeta = getETNow();
+    const afterOpen = etNowMeta.getDay() >= 1 && etNowMeta.getDay() <= 5 &&
+      (etNowMeta.getHours() > 9 || (etNowMeta.getHours() === 9 && etNowMeta.getMinutes() >= 30));
+    if (weights.premarket > 1) weights.premarket = 1;
+
+    const cardScores = {
+      econ:      parseFloat(results.econ.score)      || 0,
+      earn:      parseFloat(results.earn.score)      || 0,
+      premarket: afterOpen ? 0 : (parseFloat(results.premarket.score) || 0),
+      news:      parseFloat(results.news.score)      || 0
+    };
+
+    // Carry-forward cap
+    const econSumLower = (results.econ.summary||"").toLowerCase();
+    if ((econSumLower.includes("carry") || econSumLower.includes("prior session")) && Math.abs(cardScores.econ) > 0.5) {
+      cardScores.econ = cardScores.econ > 0 ? 0.5 : -0.5;
+    }
+
+    const totalWeight = Object.keys(weights).reduce((s, k) => s + (weights[k]||0), 0);
+    const rawWeighted = Object.keys(weights).reduce((s, k) => s + (cardScores[k]||0) * (weights[k]||0), 0);
+    const weightedScore = totalWeight > 0 ? parseFloat((rawWeighted / totalWeight).toFixed(3)) : 0;
+
+    const signal = weightedScore >= 0.5 ? "strongly_bull" : weightedScore >= 0.3 ? "bull" : weightedScore >= 0.15 ? "mildly_bull" :
+                   weightedScore <= -0.5 ? "strongly_bear" : weightedScore <= -0.3 ? "bear" : weightedScore <= -0.15 ? "mildly_bear" : "neutral";
+    const biasLabel = { strongly_bull:"STRONGLY BULLISH", bull:"BULLISH", mildly_bull:"MILDLY BULLISH",
+                        neutral:"MIXED / NEUTRAL", mildly_bear:"MILDLY BEARISH", bear:"BEARISH", strongly_bear:"STRONGLY BEARISH" }[signal];
+    const metaScore = { weights, weightedScore, signal, biasLabel, rationale: metaRaw.rationale||"" };
+
+    // ── Step 4: Save to history ──
+    const etDateKey = getETNow().toISOString().slice(0,10);
+    const snapshot = { results, metaScore, regime: activeRegime, runAt: new Date().toISOString(), autoRun: true };
+    const history = loadHistory();
+    history[etDateKey] = snapshot;
+    saveHistory(history);
+
+    schedulerLog[0].status = "complete";
+    schedulerLog[0].bias = biasLabel;
+    schedulerLog[0].date = etDateKey;
+    console.log("Scheduler: auto-analysis complete —", biasLabel, "| saved to history:", etDateKey);
+
+  } catch(e) {
+    console.error("Scheduler: auto-analysis error:", e.message);
+    if (schedulerLog[0]) schedulerLog[0].status = "error: " + e.message.slice(0,50);
+  } finally {
+    schedulerRunning = false; // always release lock, even on error
+    console.log("Scheduler: lock released");
+  }
+
+  // Schedule next run
+  scheduleNextRun();
+}
+
+function scheduleNextRun() {
+  const ms = msUntilNextSchedule();
+  if (ms === null) {
+    console.log("Scheduler: no more runs today — next run tomorrow at 7:30am ET");
+    // Check again at midnight ET
+    const et = getETNow();
+    const midnight = new Date(et);
+    midnight.setDate(midnight.getDate() + 1);
+    midnight.setHours(0, 5, 0, 0);
+    const msToMidnight = midnight.getTime() - Date.now();
+    setTimeout(scheduleNextRun, msToMidnight);
+    return;
+  }
+  const nextET = new Date(Date.now() + ms);
+  console.log("Scheduler: next run at", nextET.toLocaleTimeString("en-US", {timeZone:"America/New_York"}), "ET (in", Math.round(ms/1000/60), "min)");
+  setTimeout(function() {
+    if (schedulerEnabled) runScheduledAnalysis();
+    else scheduleNextRun(); // keep scheduling even when disabled, so toggle turns it on instantly
+  }, ms);
+}
+
+// Toggle endpoint
+app.post("/api/scheduler/toggle", function(req, res) {
+  schedulerEnabled = !schedulerEnabled;
+  console.log("Scheduler:", schedulerEnabled ? "ENABLED" : "DISABLED");
+  res.json({ enabled: schedulerEnabled, nextRun: schedulerNextRun, log: schedulerLog.slice(0,3) });
+});
+
+app.get("/api/scheduler/status", function(req, res) {
+  res.json({
+    enabled:  schedulerEnabled,
+    running:  schedulerRunning,
+    lastRun:  schedulerLastRun,
+    nextRun:  schedulerNextRun,
+    log:      schedulerLog.slice(0,5)
+  });
+});
+
+// Start scheduling on server boot
+scheduleNextRun();
+
 app.get("/health", function(req, res) {
   res.json({ status: "ok", apiKeySet: !!process.env.ANTHROPIC_API_KEY });
 });
