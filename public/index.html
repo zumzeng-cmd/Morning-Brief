@@ -1704,13 +1704,14 @@ async function autoLoadToday() {
       return;
     }
     var entry = await res.json();
-    if (!entry || !entry.results) {
-      console.log("Auto-load: history exists but no results");
+    if (!entry) {
+      console.log("Auto-load: empty response");
       return;
     }
-    // Validate — skip if cards show error state
-    // Support both flat format (manual save) and nested format (scheduler save)
-    var r = entry.results || entry; // flat: entry.econ, nested: entry.results.econ
+    // Support both formats:
+    // Flat (manual save): entry.econ, entry.earn etc at top level
+    // Nested (scheduler): entry.results.econ etc
+    var r = (entry.results && entry.results.econ) ? entry.results : entry;
     var cards = { econ: r.econ, earn: r.earn, premarket: r.premarket, news: r.news };
 
     var validCards = Object.values(cards).filter(function(c) {
