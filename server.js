@@ -335,7 +335,7 @@ async function fetchPremarket() {
       "CAC 40: " + (europe.CAC40 ? (europe.CAC40.pct >= 0 ? "+" : "") + europe.CAC40.pct + "% (" + (europe.CAC40.pct >= 0 ? "UP" : "DOWN") + ")" : "N/A"),
       "FTSE 100: " + (europe.FTSE100 ? (europe.FTSE100.pct >= 0 ? "+" : "") + europe.FTSE100.pct + "% (" + (europe.FTSE100.pct >= 0 ? "UP" : "DOWN") + ")" : "N/A"),
       "AEX: " + (europe.AEX ? (europe.AEX.pct >= 0 ? "+" : "") + europe.AEX.pct + "% (" + (europe.AEX.pct >= 0 ? "UP" : "DOWN") + ")" : "N/A"),
-      "STOXX 600: " + (europe.STOXX600 ? (europe.STOXX600.pct >= 0 ? "+" : "") + europe.STOXX600.pct + "% (" + (europe.STOXX600.pct >= 0 ? "UP" : "DOWN") + ")" : "N/A")
+      "STOXX 600: N/A (not in feed)"
     ];
     const futLines = [
       "NQ (Nasdaq 100): " + (futures.NQ ? (futures.NQ.pct >= 0 ? "+" : "") + futures.NQ.pct + "% | Price: " + futures.NQ.p : "N/A"),
