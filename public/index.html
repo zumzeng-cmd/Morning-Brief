@@ -474,15 +474,17 @@ body.sidebar-collapsed .sidebar-toggle { left: 20px; }
   </div>
 
   <!-- regime indicator -->
-  <div class="regime-bar" id="regimeBar" style="display:none;flex-direction:column;align-items:flex-start;gap:2px;">
-    <div style="display:flex;align-items:center;gap:8px;width:100%;">
-      <span class="regime-label">REGIME:</span>
+  <div class="regime-bar" id="regimeBar" style="display:none;flex-direction:column;gap:2px;">
+    <div style="display:grid;grid-template-columns:auto auto 1fr auto auto;align-items:center;gap:8px;">
+      <span class="regime-label" id="regimeLabelEl">REGIME:</span>
       <span class="regime-badge" id="regimeBadge">DETECTING...</span>
-      <span class="regime-rationale" id="regimeRationale" style="flex:1;"></span>
+      <span class="regime-rationale" id="regimeRationale"></span>
       <span class="regime-conf" id="regimeConf"></span>
       <button class="regime-reset-btn" onclick="resetRegime()" title="Force re-detect regime">↺ RE-DETECT</button>
     </div>
-    <div id="regimeFedInfo" style="font-size:10px;color:#E2E8F0;letter-spacing:0.03em;padding-left:72px;display:none;opacity:0.85;"></div>
+    <div id="regimeFedInfo" style="font-size:10px;color:#E2E8F0;letter-spacing:0.03em;display:none;opacity:0.85;grid-column:3;">
+      <span id="regimeFedInfoText"></span>
+    </div>
   </div>
 
   <!-- backtest indicator bar -->
@@ -1202,8 +1204,16 @@ async function runAll(){
         if (regData.cpiThreshold)   fedParts.push('CPI Threshold: ' + regData.cpiThreshold + '%');
         if (regData.nextFOMC)       fedParts.push('Next FOMC: ' + regData.nextFOMC);
         if (fedParts.length > 0) {
-          fedEl.textContent = fedParts.join('  ·  ');
+          var fedTextEl = document.getElementById('regimeFedInfoText');
+          if (fedTextEl) fedTextEl.textContent = fedParts.join('  ·  ');
           fedEl.style.display = 'block';
+          // Align with rationale column using JS offset
+          requestAnimationFrame(function() {
+            var ratEl = document.getElementById('regimeRationale');
+            if (ratEl && fedEl) {
+              fedEl.style.paddingLeft = ratEl.offsetLeft + 'px';
+            }
+          });
         }
       }
     } else {
