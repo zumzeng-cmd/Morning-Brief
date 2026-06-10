@@ -2631,10 +2631,12 @@ app.get("/api/tv-prices", function(req, res) {
 // Runs full analysis automatically at scheduled times ET
 // Toggle via POST /api/scheduler/toggle or GET /api/scheduler/status
 
-var schedulerEnabled = false; // off by default — toggle via UI
-var schedulerLastRun  = null;
-var schedulerNextRun  = null;
-var schedulerLog      = [];
+var schedulerEnabled    = false;
+var schedulerLastRun    = null;
+var schedulerNextRun    = null;
+var schedulerLog        = [];
+var schedulerRunning    = false;
+var scheduleNextRunTimer = null;
 
 // Scheduled run times in ET (24h format): [hour, minute]
 const SCHEDULE_TIMES = [
@@ -2676,8 +2678,6 @@ function msUntilNextSchedule() {
   console.log("Scheduler: next scheduled slot in", Math.round(next.diffMs/1000/60), "min (" + next.label + " ET)");
   return next.diffMs;
 }
-
-var schedulerRunning = false; // lock to prevent duplicate runs
 
 async function runScheduledAnalysis() {
   if (!schedulerEnabled) return;
@@ -2815,8 +2815,6 @@ async function runScheduledAnalysis() {
   scheduleNextRun();
 }
 
-var scheduleNextRunTimer = null; // prevent multiple timers
-
 function scheduleNextRun() {
   // Clear any existing timer to prevent duplicates
   if (scheduleNextRunTimer) {
@@ -2875,8 +2873,8 @@ app.get("/api/scheduler/status", function(req, res) {
   });
 });
 
-// Start scheduling on server boot
-scheduleNextRun();
+// Start scheduling on server boot — small delay to let server fully initialize
+setTimeout(scheduleNextRun, 5000);
 
 app.get("/health", function(req, res) {
   res.json({ status: "ok", apiKeySet: !!process.env.ANTHROPIC_API_KEY });
