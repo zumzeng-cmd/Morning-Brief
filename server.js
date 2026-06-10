@@ -484,7 +484,7 @@ const REGIME_PROMPT = [
   "BNISGNBN (Bad News Is Good News): Weak economic data = equities rally. Fed pivot hopes drive stocks higher on weak prints. Typical when market is pricing aggressive rate cuts and inflation is no longer the primary concern.",
   "DETECTION RULES — use ALL of the following signals:",
   "1. Fed stance: Is Fed hiking, on hold, or cutting? On hold above 4% = likely GNISBN.",
-  "2. Inflation: Is CPI/PCE above 2.5% target? If yes, Fed constrained = likely GNISBN or BNISBN.",
+  "2. Inflation: Is CPI/PCE above target? If yes, Fed constrained = likely GNISBN or BNISBN.",
   "3. Recent data reactions: Did the last NFP/CPI beat cause equities to sell off? If yes = GNISBN.",
   "4. Yield behavior: Do Treasury yields spike on strong data? If yes = GNISBN.",
   "5. Growth outlook: Are recession fears elevated? If yes and inflation still high = BNISBN.",
@@ -492,8 +492,22 @@ const REGIME_PROMPT = [
   "CURRENT MACRO CONTEXT (2025-2026): Fed has been on hold at restrictive rates. Inflation cooled from peak but remains above 2% target. Any strong labor or inflation data extends the higher-for-longer narrative. This strongly suggests GNISBN as the base regime unless you detect clear evidence of a pivot or inflation at/below target.",
   "Use today's news and premarket data to confirm or override the base regime.",
   "CONFIDENCE: Rate your confidence 1-5. If 4+, the regime is clear. If 3 or below, default to GNISBN for safety.",
-  "JSON SCHEMA: {\"regime\":\"GNISGN|GNISBN|BNISBN|BNISGNBN\",\"confidence\":4,\"rationale\":\"One sentence explaining why this regime is active today.\",\"econScoreFlip\":true}",
-  "econScoreFlip: true if strong econ data should score BEARISH (GNISBN or BNISBNBN), false if strong data scores BULLISH (GNISGN or BNISGNBN)."
+  "FED RATE EXTRACTION: Using web search, find and return the CURRENT Fed funds rate target range (e.g. 4.25-4.50%), the Fed's inflation target (always 2.0%), and calculate the CPI threshold above which inflation is clearly restrictive for the current regime. For GNISBN: threshold = Fed inflation target + 0.5% (e.g. 2.5%). For GNISGN: threshold = 3.5% (growth tolerates more inflation). For BNISBN: threshold = 2.0% (any inflation is bearish). For BNISGNBN: threshold = 4.0% (needs significant inflation drop to matter).",
+  "NEXT FOMC: Find the date of the next scheduled FOMC meeting.",
+  "JSON SCHEMA: {",
+  "\"regime\":\"GNISGN|GNISBN|BNISBN|BNISGNBN\",",
+  "\"confidence\":4,",
+  "\"rationale\":\"One sentence explaining why this regime is active today.\",",
+  "\"econScoreFlip\":true,",
+  "\"fedFundsRate\":4.25,",
+  "\"fedFundsRange\":\"4.25-4.50%\",",
+  "\"fedInflationTarget\":2.0,",
+  "\"cpiThreshold\":2.5,",
+  "\"nextFOMC\":\"2026-07-29\"",
+  "}",
+  "econScoreFlip: true if strong econ data should score BEARISH (GNISBN or BNISBN), false if strong data scores BULLISH (GNISGN or BNISGNBN).",
+  "fedFundsRate: the lower bound of the current Fed funds target range as a number.",
+  "cpiThreshold: the CPI YoY level above which inflation scores BEARISH for the current regime."
 ].join(" ");
 
 // ── Regime detection endpoint ─────────────────────────────────
@@ -522,10 +536,10 @@ app.post("/api/regime", async function(req, res) {
     ].join("\n");
 
     const body = {
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 300,
+      model: "claude-sonnet-4-6", // Sonnet needed for web search to find current Fed rate
+      max_tokens: 500,
       temperature: 0,
-      system: "You are a macro market regime analyst. CRITICAL: Reply ONLY with raw JSON, no markdown, no backticks, no explanation.",
+      system: "You are a macro market regime analyst. Use web search to find the current Fed funds rate, latest FOMC statement, and CPI data. CRITICAL: Reply ONLY with raw JSON matching the exact schema. No markdown, no backticks.",
       messages: [{ role: "user", content: REGIME_PROMPT + "\n\nDATA:\n" + contextData }]
     };
 
@@ -757,6 +771,8 @@ const ECON_PROMPT = [
   "SUMMARY FORMAT: If no confirmed actuals today — write one sentence on what is scheduled/expected, one sentence on timing. Score 0 neutral. Keep conversational.",
   "If a confirmed actual exists — state result plainly (e.g. 'CPI printed 3.4% vs 3.3% expected — hotter than forecast, bearish for equities under GNISBN.').",
   "CARRY-FORWARD RULE: If no high impact data today but NFP, CPI, PCE, or FOMC released in the prior session (yesterday or last Friday if today is Monday), carry it forward at half score (±0.5) with plain language: 'No new data today, but [event] from [day] is still influencing markets — [plain English result].'",
+  "CPI HIERARCHY RULE: For CPI releases, YoY (year-over-year) is ALWAYS the primary scoring metric — it is what the Fed targets, what bond markets price, and what equity multiples reprice on. CPI MoM (month-over-month) is secondary context showing trajectory only. A cooler MoM print does NOT flip the score bullish if YoY remains elevated above the CPI threshold. CPI_THRESHOLD_PLACEHOLDER. Example: CPI YoY above threshold + CPI MoM cool = BEARISH — the structural inflation picture (YoY) dominates. Only score bullish on CPI if YoY is falling meaningfully toward or below the Fed's 2% target.",
+  "EIA INVENTORY RULE: EIA crude oil and gasoline inventory data is a commodity signal for CL only — do NOT use it to score the econ card. It does not affect Fed policy, bond yields, or equity multiples. Ignore it for econ scoring purposes.",
   "JOBLESS CLAIMS: Higher than forecast = bad (more unemployed). Lower = good (fewer unemployed).",
   "JOLTS: Higher openings = bullish (strong labor demand). Lower = bearish.",
   "REGIME_PLACEHOLDER",
@@ -955,7 +971,21 @@ app.post("/api/analyze", async function(req, res) {
         // No regime detection has run yet — score econ neutral and prompt regime run
         regimeInstruction = "CURRENT MARKET REGIME: NOT YET DETECTED. Run regime detection first. CRITICAL SCORING RULE: Score ALL reports as 0 (neutral). Set signal to neutral and score to 0. Note the data releases in your summary but do not apply directional bias.";
       }
-      const econPromptWithRegime = ECON_PROMPT.replace("REGIME_PLACEHOLDER", regimeInstruction);
+      // Add Fed rate context dynamically from regime detection
+      const cpiThresh  = regimeCache.cpiThreshold  || 2.5;
+      const fedRate    = regimeCache.fedFundsRange  || "unknown";
+      const nextFOMC   = regimeCache.nextFOMC       || "check FOMC calendar";
+      const fedContext = "\n\nFED RATE CONTEXT: Current Fed funds rate: " + fedRate +
+        ". Fed inflation target: 2.0%. " +
+        "CPI threshold for " + (regimeCache.regime || "GNISBN") + " regime: " + cpiThresh + "% YoY. " +
+        "CPI YoY above " + cpiThresh + "% = clearly restrictive territory, delays cuts = BEARISH under this regime. " +
+        "CPI YoY below " + cpiThresh + "% = approaching tolerance band, potential for neutral/cut expectations. " +
+        "Next FOMC meeting: " + nextFOMC + ".";
+
+      const econPromptWithRegime = ECON_PROMPT
+        .replace("REGIME_PLACEHOLDER", regimeInstruction)
+        .replace("CPI_THRESHOLD_PLACEHOLDER", "CPI YoY threshold for this regime: " + cpiThresh + "%. " +
+          "Fed funds rate: " + fedRate + ". Fed target: 2.0%. Next FOMC: " + nextFOMC + ".");
 
       if (latestMakeData.econ && latestMakeData.econ.length > 100) {
         rawData = latestMakeData.econ;
