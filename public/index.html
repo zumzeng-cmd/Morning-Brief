@@ -404,6 +404,12 @@ body.sidebar-collapsed .sidebar-toggle { left: 20px; }
 }
 .sidebar-refresh:hover { border-color: var(--accent); color: var(--accent); }
 .main-content { flex: 1; min-width: 0; }
+
+.card-disclaimer {
+  font-size: 8px; color: var(--muted); letter-spacing: 0.04em;
+  padding: 4px 12px 6px; opacity: 0.6; line-height: 1.4;
+  border-top: 1px solid var(--border); margin-top: 2px;
+}
 </style>
 </head>
 <body>
@@ -869,6 +875,16 @@ function setCardResult(key,result){
   if(isShockNews){ document.getElementById('sig-'+key).style.background='rgba(255,68,68,0.2)'; document.getElementById('sig-'+key).style.color='#FF4444'; }
   document.getElementById('body-'+key).textContent = isShockNews ? cleanSummary : (result.summary||'');
   document.getElementById('body-'+key).className='card-body';
+  // Add disclaimer to pre-market and news cards
+  if (key === 'premarket' || key === 'news') {
+    var cardEl2 = document.getElementById('card-'+key);
+    if (cardEl2 && !cardEl2.querySelector('.card-disclaimer')) {
+      var disc = document.createElement('div');
+      disc.className = 'card-disclaimer';
+      disc.textContent = 'For educational purposes only. Not financial advice. Trading involves substantial risk of loss.';
+      cardEl2.appendChild(disc);
+    }
+  }
   document.getElementById('pts-'+key).textContent=(pts>=0?'+':'')+pts.toFixed(1);
   document.getElementById('pts-'+key).className='card-pts '+ptsClass;
   document.getElementById('card-'+key).className='card '+(result.signal==='bull'?'bull':result.signal==='bear'?'bear':'');
@@ -1176,11 +1192,20 @@ async function runAll(){
       regimeBadge.textContent = regData.regime;
       regimeBadge.className = 'regime-badge regime-' + regData.regime;
       // Show Fed rate info alongside confidence
-      var confText = 'Confidence: ' + (regData.confidence || '?') + '/5';
-      if (regData.fedFundsRange)  confText += ' | Fed: ' + regData.fedFundsRange;
-      if (regData.cpiThreshold)   confText += ' | CPI threshold: ' + regData.cpiThreshold + '%';
-      if (regData.nextFOMC)       confText += ' | Next FOMC: ' + regData.nextFOMC;
-      regimeConf.textContent = confText;
+      regimeConf.textContent = 'Confidence: ' + (regData.confidence || '?') + '/5';
+      // Show Fed rate details on separate line below
+      var fedEl = document.getElementById('regimeFedInfo');
+      if (!fedEl) {
+        fedEl = document.createElement('div');
+        fedEl.id = 'regimeFedInfo';
+        fedEl.style.cssText = 'font-size:10px;color:#E2E8F0;letter-spacing:0.03em;margin-top:3px;opacity:0.9;';
+        regimeConf.parentElement.appendChild(fedEl);
+      }
+      var fedParts = [];
+      if (regData.fedFundsRange)  fedParts.push('Fed Rate: ' + regData.fedFundsRange);
+      if (regData.cpiThreshold)   fedParts.push('CPI Threshold: ' + regData.cpiThreshold + '%');
+      if (regData.nextFOMC)       fedParts.push('Next FOMC: ' + regData.nextFOMC);
+      fedEl.textContent = fedParts.join('  ·  ');
     } else {
       regimeBadge.textContent = 'UNDETERMINED';
       regimeBadge.className = 'regime-badge';
