@@ -2543,6 +2543,8 @@ async function fetchWeekAhead() {
 
 app.get("/api/week-ahead", async function(req, res) {
   try {
+    // ?bust= param forces cache bypass (used by event watchers checking for actuals)
+    if (req.query.bust) weekAheadCache = { data: null, fetchedAt: 0, weekKey: null };
     const data = await fetchWeekAhead();
     res.json(data);
   } catch(e) {
