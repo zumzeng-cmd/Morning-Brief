@@ -315,6 +315,52 @@ async function fetchPremarket() {
     return null; // null triggers web search fallback in the analyze endpoint
   }
 
+  // ── PRIMARY: Use TradingView cache if fresh ──
+  // TV webhook provides actual live prices for all indices — far better than web search
+  if (tvPriceCache.isFresh(600)) { // fresh within 10 minutes
+    const asia = tvPriceCache.asia;
+    const europe = tvPriceCache.europe;
+    const futures = tvPriceCache.futures;
+
+    // Build structured premarket data string
+    const asiaLines = [
+      "Nikkei 225: " + (asia.Nikkei ? (asia.Nikkei.pct >= 0 ? "+" : "") + asia.Nikkei.pct + "% (" + (asia.Nikkei.pct >= 0 ? "UP" : "DOWN") + ")" : "N/A"),
+      "Shanghai Composite: " + (asia.Shanghai ? (asia.Shanghai.pct >= 0 ? "+" : "") + asia.Shanghai.pct + "% (" + (asia.Shanghai.pct >= 0 ? "UP" : "DOWN") + ")" : "N/A"),
+      "HSI (Hang Seng): " + (asia.HSI ? (asia.HSI.pct >= 0 ? "+" : "") + asia.HSI.pct + "% (" + (asia.HSI.pct >= 0 ? "UP" : "DOWN") + ")" : "N/A"),
+      "ASX 200: " + (asia.ASX200 ? (asia.ASX200.pct >= 0 ? "+" : "") + asia.ASX200.pct + "% (" + (asia.ASX200.pct >= 0 ? "UP" : "DOWN") + ")" : "N/A"),
+      "STI (Singapore): " + (asia.STI ? (asia.STI.pct >= 0 ? "+" : "") + asia.STI.pct + "% (" + (asia.STI.pct >= 0 ? "UP" : "DOWN") + ")" : "N/A")
+    ];
+    const euroLines = [
+      "DAX: " + (europe.DAX ? (europe.DAX.pct >= 0 ? "+" : "") + europe.DAX.pct + "% (" + (europe.DAX.pct >= 0 ? "UP" : "DOWN") + ")" : "N/A"),
+      "CAC 40: " + (europe.CAC40 ? (europe.CAC40.pct >= 0 ? "+" : "") + europe.CAC40.pct + "% (" + (europe.CAC40.pct >= 0 ? "UP" : "DOWN") + ")" : "N/A"),
+      "FTSE 100: " + (europe.FTSE100 ? (europe.FTSE100.pct >= 0 ? "+" : "") + europe.FTSE100.pct + "% (" + (europe.FTSE100.pct >= 0 ? "UP" : "DOWN") + ")" : "N/A"),
+      "AEX: " + (europe.AEX ? (europe.AEX.pct >= 0 ? "+" : "") + europe.AEX.pct + "% (" + (europe.AEX.pct >= 0 ? "UP" : "DOWN") + ")" : "N/A"),
+      "STOXX 600: " + (europe.STOXX600 ? (europe.STOXX600.pct >= 0 ? "+" : "") + europe.STOXX600.pct + "% (" + (europe.STOXX600.pct >= 0 ? "UP" : "DOWN") + ")" : "N/A")
+    ];
+    const futLines = [
+      "NQ (Nasdaq 100): " + (futures.NQ ? (futures.NQ.pct >= 0 ? "+" : "") + futures.NQ.pct + "% | Price: " + futures.NQ.p : "N/A"),
+      "ES (S&P 500): " + (futures.ES ? (futures.ES.pct >= 0 ? "+" : "") + futures.ES.pct + "% | Price: " + futures.ES.p : "N/A"),
+      "YM (Dow Jones): " + (futures.YM ? (futures.YM.pct >= 0 ? "+" : "") + futures.YM.pct + "% | Price: " + futures.YM.p : "N/A"),
+      "RTY (Russell 2000): " + (futures.RTY ? (futures.RTY.pct >= 0 ? "+" : "") + futures.RTY.pct + "% | Price: " + futures.RTY.p : "N/A")
+    ];
+
+    const tvData = [
+      "LIVE MARKET DATA (TradingView, age: " + tvPriceCache.ageSeconds() + "s):",
+      "",
+      "ASIA (final close):",
+      ...asiaLines,
+      "",
+      "EUROPE (current/final):",
+      ...euroLines,
+      "",
+      "US FUTURES (current):",
+      ...futLines
+    ].join("\n");
+
+    console.log("Premarket: using TradingView cache (age " + tvPriceCache.ageSeconds() + "s)");
+    return tvData;
+  }
+
   // Any weekday before 9:30am ET — ETF proxies don't trade yet so they return stale data
   // Asian markets have already closed, European markets are open but US ETFs haven't opened
   // Use web search for real overnight data on ALL weekday pre-market windows
@@ -2174,9 +2220,51 @@ const MARKET_SYMBOLS = [
   { ticker:"DXY", finnhub:"DX=F",  td:"DX1!",  group:"dxy",      name:"US Dollar Index" },
 ];
 
+// Build quote map with relative strength rankings
+function buildQuoteMap(quotes) {
+  const map = {};
+  const groups = {};
+  quotes.forEach(q => {
+    map[q.ticker] = q;
+    if (!groups[q.group]) groups[q.group] = [];
+    if (q.pct !== null) groups[q.group].push(q);
+  });
+  // Rank within group by pct change
+  Object.values(groups).forEach(grp => {
+    const sorted = [...grp].sort((a,b) => (b.pct||0) - (a.pct||0));
+    sorted.forEach((q, i) => {
+      map[q.ticker].strengthRank = i + 1;
+      map[q.ticker].strengthTotal = sorted.length;
+      map[q.ticker].isStrongest = i === 0 && sorted.length > 1;
+      map[q.ticker].isWeakest = i === sorted.length - 1 && sorted.length > 1;
+    });
+  });
+  return map;
+}
+
 async function fetchLivePrices() {
-  const results = {};
   const TD_KEY = process.env.TWELVE_DATA_API_KEY || "559c9af13d024c02bc3dde90163dbf8d";
+
+  // ── PRIMARY: TradingView webhook cache (real-time, no rate limits) ──
+  if (tvPriceCache.isFresh(300)) { // fresh within 5 minutes
+    console.log("Market prices: using TradingView cache (age " + tvPriceCache.ageSeconds() + "s)");
+    const quotes = MARKET_SYMBOLS.map(s => {
+      const tvData = tvPriceCache.futures[s.ticker];
+      if (!tvData || !tvData.p) return { ticker: s.ticker, group: s.group, price: null, pct: null };
+      return {
+        ticker: s.ticker, group: s.group,
+        price:  parseFloat(tvData.p),
+        prev:   parseFloat(tvData.p) - parseFloat(tvData.c || 0),
+        change: parseFloat(tvData.c || 0),
+        pct:    parseFloat(tvData.pct || 0),
+        high:   0, low: 0
+      };
+    });
+    // Add relative strength rankings
+    return buildQuoteMap(quotes);
+  }
+
+  console.log("Market prices: TV cache stale/empty (" + tvPriceCache.ageSeconds() + "s), falling back to Twelve Data");
 
   // Twelve Data — free tier = 8 credits/min, each symbol costs 2 credits = max 4 per call
   // Batch 1 (auto on load): NQ, ES, GC, CL — highest priority instruments
@@ -2461,6 +2549,69 @@ app.get("/api/week-ahead", async function(req, res) {
     console.error("WeekAhead error:", e.message);
     res.status(500).json({ error: e.message });
   }
+});
+
+
+// ── TradingView Webhook Price Cache ──────────────────────────
+// Receives real-time prices from TradingView Pine Script alerts
+// Replaces Twelve Data (rate limited) and web scraping for prices
+
+var tvPriceCache = {
+  futures: {},   // ES, NQ, YM, RTY, GC, SI, HG, PL, CL, NG, DXY
+  asia: {},      // Nikkei, Shanghai, HSI, ASX200, STI
+  europe: {},    // DAX, CAC40, FTSE100, AEX, STOXX600
+  receivedAt: null,
+  ageSeconds: function() {
+    return this.receivedAt ? Math.round((Date.now() - this.receivedAt) / 1000) : 9999;
+  },
+  isFresh: function(maxAgeSeconds) {
+    return this.receivedAt && this.ageSeconds() < maxAgeSeconds;
+  }
+};
+
+// Receive TradingView webhook payload
+app.post("/api/tv-prices", function(req, res) {
+  try {
+    const data = req.body;
+    if (!data || (!data.futures && !data.asia && !data.europe)) {
+      return res.status(400).json({ error: "Invalid payload — expected futures/asia/europe keys" });
+    }
+
+    const prev = tvPriceCache.receivedAt ? tvPriceCache.ageSeconds() : null;
+
+    if (data.futures) tvPriceCache.futures = data.futures;
+    if (data.asia)    tvPriceCache.asia    = data.asia;
+    if (data.europe)  tvPriceCache.europe  = data.europe;
+    tvPriceCache.receivedAt = Date.now();
+
+    const symCount = Object.keys(tvPriceCache.futures).length
+      + Object.keys(tvPriceCache.asia).length
+      + Object.keys(tvPriceCache.europe).length;
+
+    console.log("TV webhook received:", symCount, "symbols",
+      prev !== null ? "(prev was " + prev + "s ago)" : "(first ping)");
+
+    // Log key futures for quick sanity check
+    if (tvPriceCache.futures.NQ) console.log("  NQ:", tvPriceCache.futures.NQ.p, "(" + tvPriceCache.futures.NQ.pct + "%)");
+    if (tvPriceCache.futures.ES) console.log("  ES:", tvPriceCache.futures.ES.p, "(" + tvPriceCache.futures.ES.pct + "%)");
+
+    res.json({ ok: true, symbols: symCount, ts: new Date().toISOString() });
+  } catch(e) {
+    console.error("TV webhook error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET endpoint so you can inspect the cache from browser
+app.get("/api/tv-prices", function(req, res) {
+  res.json({
+    cached: !!tvPriceCache.receivedAt,
+    ageSeconds: tvPriceCache.receivedAt ? tvPriceCache.ageSeconds() : null,
+    receivedAt: tvPriceCache.receivedAt ? new Date(tvPriceCache.receivedAt).toISOString() : null,
+    futures: tvPriceCache.futures,
+    asia: tvPriceCache.asia,
+    europe: tvPriceCache.europe
+  });
 });
 
 app.get("/health", function(req, res) {
