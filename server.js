@@ -757,20 +757,31 @@ const EARN_PROMPT = [
 ].join(" ");
 
 const PREMARKET_PROMPT = [
-  "From this data, score pre-market sentiment for US index futures (NQ/ES) using this exact methodology:",
-  "DATA RULE: Always use the MOST RECENT data available — FINAL CLOSING prices for markets that have closed, CURRENT prices for markets still open. If markets reversed direction during the session (e.g. opened bullish but closed bearish due to news), use the FINAL CLOSE, not the intraday high.",
-  "ASIA SCORE: Count each of these 5 indices individually — HSI, Nikkei 225, ASX 200, Shanghai Composite, STI. Use FINAL CLOSING % change. Rule: up = bullish count, down = bearish count. If bullish count > bearish count = Asia BULLISH. If bearish count > bullish count = Asia BEARISH. If tied = Asia NEUTRAL.",
-  "EUROPE SCORE: Same count for STOXX 600, DAX, FTSE 100, AEX, CAC 40. Use FINAL CLOSING prices — if European markets closed before a major US session event, note that in summary.",
-  "US FUTURES: Use CURRENT pre-market direction of NQ, ES, YM as primary signal — these reflect the most recent pricing.",
-  "WEIGHTING RULE: (1) Current US futures wins outright — they reflect the most recent information. (2) If no US futures data, Europe final close wins over Asia. (3) Asia only if Europe unavailable.",
-  "PARTIAL REBOUND RULE: If US cash closed sharply lower (>0.5% down) and overnight futures show only a small partial rebound (<0.5% up), score NEUTRAL not BULL — a small bounce after a large drop is consolidation, not a bullish reversal. Only score BULL if futures are up meaningfully OR if a clear new catalyst (deal signed, de-escalation confirmed) justifies the move.",
-  "TIMELINE RULE: Catalysts must be evaluated in CHRONOLOGICAL ORDER. If a positive catalyst (e.g. peace deal comment) was followed by a negative catalyst (e.g. military strike, market crash), the LATER event takes precedence. A pre-shock bullish statement does not override a post-shock market reaction. Ask: what is the MOST RECENT market-moving event? That is what the score should reflect.",
-  "MARKET SHOCK RULE: If you detect language suggesting a major market shock occurred during the session (military strikes, crash >1.5%, emergency event) — score BEARISH regardless of any earlier bullish pre-market data. The shock resets the signal. A small overnight bounce after a shock is noise, not a reversal.",
-  "FINAL SIGNAL EXAMPLES: US futures down = BEAR. Cash crashed on shock then tiny overnight bounce = BEAR or NEUTRAL. Asia BEARISH + Europe BULLISH = BULL (Europe wins). All bearish = BEAR. Shock occurred during session = BEAR.",
-  "SUMMARY: State Asia final close (X bullish, Y bearish of 5), Europe final close (X bullish, Y bearish of 5), current US futures direction. Note if markets reversed on late-breaking news. Two sentences max.",
+  "You are scoring overnight/pre-market or post-market sentiment for US index futures (NQ/ES) for a day trader.",
+  "",
+  "STEP 1 — BUILD THE TIMELINE FIRST. Before scoring, identify what happened and WHEN:",
+  "List key events in chronological order with approximate times. This matters because a bullish catalyst at 9am followed by a military strike at 5pm means the STRIKE is the most recent signal, not the 9am comment.",
+  "Ask: what is the sequence? What is the MOST RECENT market-moving development?",
+  "",
+  "STEP 2 — SCORE EACH REGION with exact counts from FINAL CLOSING prices:",
+  "ASIA (5 indices): HSI, Nikkei 225, ASX 200, Shanghai Composite, STI. Count exactly: how many closed UP, how many DOWN. State as 'X of 5 bullish' — do not round or approximate. Up = bullish count, down = bearish. Majority (3+) wins.",
+  "EUROPE (5 indices): STOXX 600, DAX, FTSE 100, AEX, CAC 40. Same exact count. If AEX or any index data is missing or inconclusive, state that and use available data only.",
+  "US FUTURES: NQ and ES are the primary signal — they represent the S&P 500 and Nasdaq 100 which are the main instruments for most futures traders. YM (Dow) and RTY (Russell) are secondary context. DIVERGENCE RULE: If NQ/ES are down but YM/RTY are up, this indicates defensive rotation — NOT a bullish signal. Score based on NQ/ES direction. State the divergence explicitly in your summary (e.g. 'NQ -0.5%, ES -0.3% while YM/RTY slightly positive — defensive rotation, not broad risk-on').",
+  "",
+  "STEP 3 — WEIGHTING:",
+  "US futures = primary signal, wins outright.",
+  "Europe final close > Asia if no futures data.",
+  "Context is critical: NQ +1.4% overnight after a -4.77% prior session crash = partial recovery, not a new bull trend. State this context explicitly.",
+  "",
+  "PARTIAL REBOUND RULE: Small bounce (<0.5%) after large crash = NEUTRAL. Meaningful recovery (>0.5%) with clear ongoing catalyst = BULL.",
+  "SHOCK AFTERMATH RULE: If a military/emergency shock occurred in the prior session, overnight futures must be clearly positive (>0.5%) AND have a clear reason (ceasefire, deal confirmed, resolution) to score BULL. Otherwise NEUTRAL.",
+  "",
+  "SUMMARY: Two sentences.",
+  "Sentence 1: Asia X/5 bullish [list which ones up/down with %], Europe X/5 bullish [list], US futures NQ/ES [%].",
+  "Sentence 2: The dominant driver including timeline context — what happened in what order and what it means for today's open.",
   "Score: bull=1, bear=-1, neutral=0.",
   "JSON SCHEMA: {\"signal\":\"bull|bear|neutral\",\"summary\":\"2 sentence summary\",\"score\":1,\"guidance\":null}"
-].join(" ");
+].join("\n");
 
 const NEWS_PROMPT = [
   "You are scoring news for a DAY TRADER. The question is: what is moving markets RIGHT NOW during today's session — not what the structural macro backdrop is.",
