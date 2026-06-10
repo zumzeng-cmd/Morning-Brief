@@ -474,12 +474,15 @@ body.sidebar-collapsed .sidebar-toggle { left: 20px; }
   </div>
 
   <!-- regime indicator -->
-  <div class="regime-bar" id="regimeBar" style="display:none;">
-    <span class="regime-label">Regime:</span>
-    <span class="regime-badge" id="regimeBadge">DETECTING...</span>
-    <span class="regime-rationale" id="regimeRationale"></span>
-    <span class="regime-conf" id="regimeConf"></span>
-    <button class="regime-reset-btn" onclick="resetRegime()" title="Force re-detect regime">↺ RE-DETECT</button>
+  <div class="regime-bar" id="regimeBar" style="display:none;flex-direction:column;align-items:flex-start;gap:2px;">
+    <div style="display:flex;align-items:center;gap:8px;width:100%;">
+      <span class="regime-label">REGIME:</span>
+      <span class="regime-badge" id="regimeBadge">DETECTING...</span>
+      <span class="regime-rationale" id="regimeRationale" style="flex:1;"></span>
+      <span class="regime-conf" id="regimeConf"></span>
+      <button class="regime-reset-btn" onclick="resetRegime()" title="Force re-detect regime">↺ RE-DETECT</button>
+    </div>
+    <div id="regimeFedInfo" style="font-size:10px;color:#E2E8F0;letter-spacing:0.03em;padding-left:4px;display:none;opacity:0.9;"></div>
   </div>
 
   <!-- backtest indicator bar -->
@@ -540,6 +543,13 @@ body.sidebar-collapsed .sidebar-toggle { left: 20px; }
       <div class="card-body idle" id="body-news">Run analysis to scan headlines...</div>
       <div class="card-footer"><span class="card-pts pts-neu" id="pts-news">0.0</span><span class="card-weight" id="wt-news">Weight: —</span></div>
     </div>
+  </div>
+
+  <!-- disclaimer -->
+  <div id="disclaimerRow" style="display:none;padding:6px 0 2px;text-align:center;">
+    <span style="font-size:9px;color:var(--muted);letter-spacing:0.04em;opacity:0.6;">
+      For educational purposes only · Not financial advice · Trading involves substantial risk of loss · Past performance does not guarantee future results
+    </span>
   </div>
 
   <!-- overrides -->
@@ -875,16 +885,7 @@ function setCardResult(key,result){
   if(isShockNews){ document.getElementById('sig-'+key).style.background='rgba(255,68,68,0.2)'; document.getElementById('sig-'+key).style.color='#FF4444'; }
   document.getElementById('body-'+key).textContent = isShockNews ? cleanSummary : (result.summary||'');
   document.getElementById('body-'+key).className='card-body';
-  // Add disclaimer to pre-market and news cards
-  if (key === 'premarket' || key === 'news') {
-    var cardEl2 = document.getElementById('card-'+key);
-    if (cardEl2 && !cardEl2.querySelector('.card-disclaimer')) {
-      var disc = document.createElement('div');
-      disc.className = 'card-disclaimer';
-      disc.textContent = 'For educational purposes only. Not financial advice. Trading involves substantial risk of loss.';
-      cardEl2.appendChild(disc);
-    }
-  }
+
   document.getElementById('pts-'+key).textContent=(pts>=0?'+':'')+pts.toFixed(1);
   document.getElementById('pts-'+key).className='card-pts '+ptsClass;
   document.getElementById('card-'+key).className='card '+(result.signal==='bull'?'bull':result.signal==='bear'?'bear':'');
@@ -1009,6 +1010,7 @@ async function runAll(){
   // Reset rationale
   var rb2=document.getElementById('rationaleBox'); if(rb2) rb2.style.display='none';
   var rt2=document.getElementById('rationaleText'); if(rt2) rt2.textContent='';
+  var discRow=document.getElementById('disclaimerRow'); if(discRow) discRow.style.display='none';
   // Reset markets and summary
   document.getElementById('marketsContent').innerHTML='<div class="markets-empty">Updating market implications...</div>';
   document.getElementById('summaryContent').innerHTML='<div class="summary-loading">Generating summary...</div>';
@@ -1193,19 +1195,17 @@ async function runAll(){
       regimeBadge.className = 'regime-badge regime-' + regData.regime;
       // Show Fed rate info alongside confidence
       regimeConf.textContent = 'Confidence: ' + (regData.confidence || '?') + '/5';
-      // Show Fed rate details on separate line below
       var fedEl = document.getElementById('regimeFedInfo');
-      if (!fedEl) {
-        fedEl = document.createElement('div');
-        fedEl.id = 'regimeFedInfo';
-        fedEl.style.cssText = 'font-size:10px;color:#E2E8F0;letter-spacing:0.03em;margin-top:3px;opacity:0.9;';
-        regimeConf.parentElement.appendChild(fedEl);
+      if (fedEl) {
+        var fedParts = [];
+        if (regData.fedFundsRange)  fedParts.push('Fed Rate: ' + regData.fedFundsRange);
+        if (regData.cpiThreshold)   fedParts.push('CPI Threshold: ' + regData.cpiThreshold + '%');
+        if (regData.nextFOMC)       fedParts.push('Next FOMC: ' + regData.nextFOMC);
+        if (fedParts.length > 0) {
+          fedEl.textContent = fedParts.join('  ·  ');
+          fedEl.style.display = 'block';
+        }
       }
-      var fedParts = [];
-      if (regData.fedFundsRange)  fedParts.push('Fed Rate: ' + regData.fedFundsRange);
-      if (regData.cpiThreshold)   fedParts.push('CPI Threshold: ' + regData.cpiThreshold + '%');
-      if (regData.nextFOMC)       fedParts.push('Next FOMC: ' + regData.nextFOMC);
-      fedEl.textContent = fedParts.join('  ·  ');
     } else {
       regimeBadge.textContent = 'UNDETERMINED';
       regimeBadge.className = 'regime-badge';
@@ -1234,6 +1234,8 @@ async function runAll(){
   }
   lastResults = results;
   await saveSnapshot(results);
+  var discRow2 = document.getElementById('disclaimerRow');
+  if (discRow2) discRow2.style.display = 'block';
 
   // ── Meta-score: ask Claude to dynamically weight all 4 signals ──
   var rationaleBox = document.getElementById('rationaleBox');
