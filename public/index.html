@@ -1708,7 +1708,15 @@ async function autoLoadToday() {
       console.log("Auto-load: history exists but no results");
       return;
     }
-    console.log("Auto-load: found history for", today, "— restoring...");
+    // Validate — skip if cards show error state
+    var validCards = Object.values(entry.results).filter(function(r) {
+      return r && r.summary && !r.summary.includes("Could not") && !r.summary.includes("Error") && r.summary.length > 20;
+    }).length;
+    if (validCards < 3) {
+      console.log("Auto-load: skipping invalid snapshot (" + validCards + "/4 valid cards)");
+      return;
+    }
+    console.log("Auto-load: found valid history for", today, "(" + validCards + "/4 cards) — restoring...");
 
     // Restore all card results
     var r = entry.results;
