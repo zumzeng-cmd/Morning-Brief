@@ -2462,9 +2462,10 @@ async function fetchWeekAhead() {
   const toStr   = friday.toISOString().slice(0,10);
   const weekKey = fromStr;
 
-  // Use cache if same week and less than 1 hour old
+  // Use cache if same week and less than 15 minutes old
+  // Short TTL ensures earnings actuals show up quickly after release
   const cacheAge = Date.now() - weekAheadCache.fetchedAt;
-  if (weekAheadCache.data && weekAheadCache.weekKey === weekKey && cacheAge < 3600000) {
+  if (weekAheadCache.data && weekAheadCache.weekKey === weekKey && cacheAge < 900000) {
     return weekAheadCache.data;
   }
 
