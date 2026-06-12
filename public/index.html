@@ -1978,9 +1978,10 @@ function renderWeekAhead(data) {
   el.innerHTML = html;
 }
 
-async function loadWeekAhead() {
+async function loadWeekAhead(bust) {
   try {
-    var res = await fetch(BASE + '/api/week-ahead');
+    var url = BASE + '/api/week-ahead' + (bust ? '?bust=' + Date.now() : '');
+    var res = await fetch(url);
     var data = await res.json();
     renderWeekAhead(data);
   } catch(e) {
@@ -1991,7 +1992,7 @@ async function loadWeekAhead() {
 
 // Load on page start
 document.addEventListener('DOMContentLoaded', function() {
-  loadWeekAhead();
+  loadWeekAhead(true); // bust cache on page load to get latest earnings actuals
   startPricePolling();
   scheduleEventWatchers();
   checkSchedulerStatus();
@@ -2006,6 +2007,8 @@ function startPricePolling() {
   if (pricePollingTimer) clearInterval(pricePollingTimer);
   pricePollingTimer = setInterval(pollPrices, 60000); // every 60 seconds
   console.log("Price polling started (60s interval)");
+  // Also refresh week-ahead sidebar every 15 minutes to pick up released earnings
+  setInterval(function() { loadWeekAhead(); }, 900000);
 }
 
 // ── Smart econ/earnings event watchers ──────────────────────
