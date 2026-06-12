@@ -2562,6 +2562,35 @@ async function fetchWeekAhead() {
   econEvents.sort((a,b) => a.date.localeCompare(b.date) || (a.tier - b.tier));
   earnEvents.sort((a,b) => a.date.localeCompare(b.date));
 
+  // ── Backfill actuals from FMP earnings history for any scheduled entries ──
+  // FMP calendar often lags 1-3 days on actuals even after release
+  const scheduledEarnings = earnEvents.filter(e => e.status === "scheduled" && WATCH_TICKERS.has(e.ticker));
+  if (scheduledEarnings.length > 0) {
+    await Promise.allSettled(scheduledEarnings.map(async (e) => {
+      try {
+        const histRaw = await fetchUrl(
+          "https://financialmodelingprep.com/stable/earnings?symbol=" + e.ticker + "&limit=2&apikey=" + FMP_KEY
+        );
+        const histJson = JSON.parse(histRaw);
+        if (Array.isArray(histJson) && histJson.length > 0) {
+          const latest = histJson[0];
+          const latestDate = (latest.date || latest.reportedDate || "").slice(0,10);
+          // Check if this matches our scheduled entry (within 2 days)
+          const dayDiff = Math.abs(new Date(latestDate) - new Date(e.date)) / 86400000;
+          if (dayDiff <= 3 && latest.eps !== null && latest.eps !== undefined) {
+            e.epsActual = parseFloat(latest.eps);
+            e.revActual = latest.revenue ? parseFloat(latest.revenue) : null;
+            e.status = "released";
+            if (e.epsEst !== null) {
+              e.beat = e.epsActual > e.epsEst ? "beat" : e.epsActual < e.epsEst ? "miss" : "inline";
+            }
+            console.log("WeekAhead: backfilled actuals for", e.ticker, "EPS:", e.epsActual, e.beat);
+          }
+        }
+      } catch(err) { console.log("WeekAhead backfill error for", e.ticker, err.message); }
+    }));
+  }
+
   // ── Notable events (IPOs, Fed speeches, major expirations) ──
   const notableEvents = [];
   // Try multiple IPO endpoints — FMP has inconsistent endpoint naming
